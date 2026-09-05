@@ -10,11 +10,15 @@ Documentos relacionados: [PRD v1 — motor adaptativo](./PRD-adaptive-learning-e
 
 ## Onde estamos
 
-Mergeado em `main` (PRs #1 a #19): motor de decisão com volta ao pré-requisito, revisão espaçada, diagnóstico do tipo de erro, medidor de foco contestável, validação de lição gerada, alertas ao responsável, XP ligado a prova de aprendizagem, evidência de avaliação, log de decisões, linha do tempo, override humano, nivelamento, currículo no banco, autoria de matérias e árvores, pt-BR como padrão, CI e 160 testes.
+*Atualizado em 5 de setembro de 2026.*
 
-Em revisão: [#20](https://github.com/LuizArgenta/open-alpha/pull/20), correção da prova no servidor.
+Mergeado em `main` (PRs #1 a #19): motor de decisão com volta ao pré-requisito, revisão espaçada, diagnóstico do tipo de erro, medidor de foco contestável, validação de lição gerada, alertas ao responsável, XP ligado a prova de aprendizagem, evidência de avaliação, log de decisões, linha do tempo, override humano, nivelamento, currículo no banco, autoria de matérias e árvores, pt-BR como padrão e CI.
 
-**O que isso ainda não é:** uma plataforma segura para uso real por menores. O bloco P0 abaixo é o que separa uma coisa da outra.
+Mergeado depois disso, os **seis primeiros itens do Marco 1**: [#20](https://github.com/LuizArgenta/open-alpha/pull/20) correção da prova no servidor, [#22](https://github.com/LuizArgenta/open-alpha/pull/22) transação única na submissão e expiração de tentativa, [#23](https://github.com/LuizArgenta/open-alpha/pull/23) fim do fallback silencioso, [#24](https://github.com/LuizArgenta/open-alpha/pull/24) leitura de currículo endurecida, [#25](https://github.com/LuizArgenta/open-alpha/pull/25) invalidação do cache de currículo, [#26](https://github.com/LuizArgenta/open-alpha/pull/26) nivelamento no modelo de tentativa.
+
+**204 testes**, contra 160 quando este plano foi escrito.
+
+**O que isso ainda não é:** uma plataforma segura para uso real por menores. **Toda a metade de segurança do Marco 1 (itens 7 a 12) segue aberta** — senha, sessão, IDOR, cabeçalhos, varredura de dependências. Nenhum aluno real antes disso.
 
 ---
 
@@ -23,11 +27,11 @@ Em revisão: [#20](https://github.com/LuizArgenta/open-alpha/pull/20), correçã
 Nada aqui é opcional antes de colocar um aluno real no sistema.
 
 - [x] **1. Corrigir a prova no servidor** — PR #20. A nota era declarada pelo navegador e o gabarito era enviado para a página.
-- [ ] **2. Transação única na submissão** *(M)* — resposta, nota, domínio, XP e decisão são escritas separadas hoje; uma falha no meio deixa XP concedido sem progresso atualizado. Inclui expirar tentativa abandonada. Requer estender `executeSql`, que não expõe transação.
-- [ ] **3. Mesmo modelo de tentativa no nivelamento** *(P)* — hoje corrige no servidor mas aceita a lista de respostas de uma vez. Reusa o que o #20 criou.
-- [ ] **4. Endurecer a leitura do currículo** *(M)* — validar cada JSON contra schema ao carregar, importação transacional, hash da versão publicada, não incrementar versão quando o conteúdo não mudou. Um registro corrompido não pode derrubar o carregamento inteiro.
-- [ ] **5. Fim do fallback silencioso** *(P)* — **o item mais importante deste marco.** Hoje, falha do banco em produção serve o currículo dos arquivos sem ninguém perceber. Precisa de modo degradado explícito e visível.
-- [ ] **6. Invalidação do cache de currículo** *(M)* — cada instância serverless carrega o currículo no cold start e nunca mais atualiza, então publicar não chega a quem já está no ar.
+- [x] **2. Transação única na submissão** — PR #22. `executeTransaction` no `db.ts`; a submissão decide tudo antes de escrever e escreve uma vez, com as decisões dentro da transação. Tentativa expira em 2h, varrida na próxima prova que o aluno abre.
+- [x] **3. Mesmo modelo de tentativa no nivelamento** — PR #26. Fechou um buraco não previsto: o conceito ao qual cada resposta contava vinha do cliente.
+- [x] **4. Endurecer a leitura do currículo** — PR #24. Validação por registro, importação transacional, hash de conteúdo. Achou também a prova impossível de passar: resposta que não casa com nenhuma opção.
+- [x] **5. Fim do fallback silencioso** — PR #23. `curriculumStatus`, `GET /api/health/curriculum` respondendo 503, aviso na página de admin, e `CURRICULUM_REQUIRE_DATABASE` para recusar servir os arquivos.
+- [x] **6. Invalidação do cache de currículo** — PR #25. Revisão derivada (ninguém precisa lembrar de incrementar) e refresh em segundo plano; publicar força a instância que atendeu.
 - [ ] **7. Argon2id, rate limiting e anti-enumeração** *(M)* — bcrypt com 10 rounds hoje; login e cadastro sem limite de tentativas.
 - [ ] **8. Sessão: token curto, rotação, revogação, logout global** *(M)* — hoje o token vale 7 dias e não há como revogar.
 - [ ] **9. Sair do localStorage para cookie HttpOnly + CSRF** *(G)* — **fazer isolado.** Toca toda chamada autenticada do frontend; um erro aqui derruba o login de todo mundo.
@@ -76,8 +80,8 @@ Precisam de alguém que não é o time de engenharia:
 
 ## Sequência recomendada
 
-1. **Agora:** 2 → 5 → 4 → 6 → 3. Os cinco que impedem estado inconsistente ou currículo errado servido em silêncio. Todos M ou P.
-2. **Em seguida:** 11 → 12 → 7 → 10. Segurança de custo baixo e risco alto.
+1. ~~**Agora:** 2 → 5 → 4 → 6 → 3.~~ **Feito** (PRs #22 a #26). Nenhum caminho conhecido deixa hoje estado inconsistente numa submissão, e nenhuma instância serve currículo errado sem dizer.
+2. **Agora:** 11 → 12 → 7 → 10. Segurança de custo baixo e risco alto.
 3. **Antes de qualquer algoritmo novo:** 13 e 19. Sem mais itens, nivelamento e modelo probabilístico ficam limitados pelo dado, não pelo algoritmo — e LGPD não espera.
 4. O 9 em separado, por tocar toda chamada autenticada.
 
@@ -86,7 +90,7 @@ Precisam de alguém que não é o time de engenharia:
 Chamar isto de substituto local acadêmico exige, da auditoria:
 
 - [x] Toda nota calculada no servidor *(PR #20)*
-- [ ] Todo domínio reconstruível a partir das evidências
+- [x] Todo domínio reconstruível a partir das evidências *(PRs #20, #22, #26 — prova e nivelamento guardam item, resposta e decisão; falta só o banco de itens do #13 para reconstruir também **qual** item)*
 - [ ] Currículo-alvo completo e revisado
 - [ ] Atividades escolhidas por domínio e incerteza
 - [ ] Funciona sem dependência obrigatória de nuvem
@@ -97,3 +101,14 @@ Chamar isto de substituto local acadêmico exige, da auditoria:
 - [ ] Pentest sem riscos críticos ou altos pendentes
 
 Até lá, o honesto é apresentar como **plataforma experimental de aprendizagem adaptativa**, não como substituto da Alpha.
+
+---
+
+## O que apareceu no caminho
+
+Coisas que a auditoria não listou e que o trabalho dos PRs #22–#26 revelou. Registradas aqui para não se perderem:
+
+- **Prova impossível de passar.** Um item cuja `correctAnswer` não corresponde a nenhuma opção renderiza normalmente e reprova todo aluno, sempre — e o motor lê isso como lacuna e manda o aluno de volta a um pré-requisito que ele já domina. Agora é rejeitado na leitura (#24), mas **os itens gerados por LLM entram pelo mesmo caminho**: vale checar quantos já existem no banco.
+- **Conceito atribuído pelo cliente no nivelamento** (#26). Mesma família do #20, em endpoint diferente. Sugere varrer os outros endpoints que aceitam identificador vindo do navegador — é o item 10.
+- **`executeSql` liga parâmetros por ordem de aparição, não pelo número do `$N`.** Um placeholder repetido consome um argumento a menos e escreve na coluna errada sem falhar. Já mordeu duas vezes. **Merece um PR próprio**, com testes, antes de crescer mais código em cima.
+- **Confiança do domínio ainda é 1.0 para prova e 0.6 para nivelamento, fixos.** É o item 17, e continua certo adiar até haver aluno real — mas o campo já existe e já é lido, então o dia em que houver dado ele está pronto.
