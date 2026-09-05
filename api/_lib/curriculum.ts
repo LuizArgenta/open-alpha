@@ -149,13 +149,107 @@ export function getConceptsForGrade(subjectId: string, gradeLevel: number): Conc
   return filtered;
 }
 
+export const MASTERY_THRESHOLD = 80;
+
+// Three failed attempts is where "try again" stops being useful and the gap is
+// more likely to be in a prerequisite than in this concept.
+const STRUGGLE_ATTEMPTS = 3;
+
+export interface ProgressRecord {
+  conceptId: string;
+  masteryScore: number;
+  attempts: number;
+}
+
+export function toProgressMap(progress: ProgressRecord[]): Map<string, ProgressRecord> {
+  return new Map(progress.map(record => [record.conceptId, record]));
+}
+
+/**
+ * Walks up the prerequisite chain and returns the nearest concept the student
+ * has never demonstrated. Nearest rather than deepest on purpose: sending a
+ * 7th grader straight back to counting on the first stumble is worse than
+ * stepping back one link at a time.
+ */
+function findUnverifiedPrerequisite(
+  subjectId: string,
+  concept: Concept,
+  progressById: Map<string, ProgressRecord>
+): Concept | undefined {
+  const queue = [...concept.prerequisites];
+  const seen = new Set<string>();
+
+  while (queue.length > 0) {
+    const prerequisiteId = queue.shift()!;
+    if (seen.has(prerequisiteId)) continue;
+    seen.add(prerequisiteId);
+
+    const prerequisite = getConcept(subjectId, prerequisiteId);
+    if (!prerequisite) continue;
+    if (!progressById.has(prerequisiteId)) return prerequisite;
+
+    queue.push(...prerequisite.prerequisites);
+  }
+
+  return undefined;
+}
+
+/**
+ * The prerequisite most likely to be the actual blocker: one never attempted,
+ * otherwise the one with the lowest mastery.
+ */
+function findWeakestPrerequisite(
+  subjectId: string,
+  concept: Concept,
+  progressById: Map<string, ProgressRecord>
+): Concept | undefined {
+  const unverified = findUnverifiedPrerequisite(subjectId, concept, progressById);
+  if (unverified) return unverified;
+
+  let weakest: Concept | undefined;
+  let weakestScore = Infinity;
+  for (const prerequisiteId of concept.prerequisites) {
+    const prerequisite = getConcept(subjectId, prerequisiteId);
+    const record = progressById.get(prerequisiteId);
+    if (!prerequisite || !record) continue;
+    if (record.masteryScore < weakestScore) {
+      weakest = prerequisite;
+      weakestScore = record.masteryScore;
+    }
+  }
+  return weakest;
+}
+
 export function getNextConcept(
   subjectId: string,
-  completedConceptIds: string[],
+  progress: ProgressRecord[],
   gradeLevel: number
 ): Concept | undefined {
   const availableConcepts = getConceptsForGrade(subjectId, gradeLevel);
+  const progressById = toProgressMap(progress);
+  const completedConceptIds = progress
+    .filter(record => record.masteryScore >= MASTERY_THRESHOLD)
+    .map(record => record.conceptId);
 
+  const candidate = selectCandidate(availableConcepts, completedConceptIds, gradeLevel);
+  if (!candidate) return undefined;
+
+  // Repeated failures on the same concept usually mean a missing prerequisite,
+  // not a need to see the same material a fourth time.
+  const record = progressById.get(candidate.id);
+  if (record && record.attempts >= STRUGGLE_ATTEMPTS && record.masteryScore < MASTERY_THRESHOLD) {
+    const gap = findUnverifiedPrerequisite(subjectId, candidate, progressById);
+    if (gap) return gap;
+  }
+
+  return candidate;
+}
+
+function selectCandidate(
+  availableConcepts: Concept[],
+  completedConceptIds: string[],
+  gradeLevel: number
+): Concept | undefined {
   // If student has no progress, start them at their grade level (not kindergarten)
   if (completedConceptIds.length === 0) {
     // First, try to find a concept AT their grade level
@@ -187,6 +281,61 @@ export function getNextConcept(
     if (completedConceptIds.includes(concept.id)) return false;
     return concept.prerequisites.every(prereq => completedConceptIds.includes(prereq));
   });
+}
+
+export interface ResolvedRemediation {
+  action: RemediationPath['action'];
+  message: string;
+  conceptId?: string;
+  conceptName?: string;
+}
+
+/**
+ * Turns the concept's authored remediationPath into something the UI can act
+ * on: a message plus, where the action points somewhere, the concept to go to.
+ * Concepts without an authored path still get a useful answer when the student
+ * has a visibly weak prerequisite.
+ */
+export function resolveRemediation(
+  subjectId: string,
+  concept: Concept,
+  progressById: Map<string, ProgressRecord>
+): ResolvedRemediation | undefined {
+  const path = concept.remediationPath;
+
+  if (path?.action === 'sub_skill' && path.conceptId) {
+    const target = getConcept(subjectId, path.conceptId);
+    return {
+      action: path.action,
+      message: path.message,
+      conceptId: path.conceptId,
+      conceptName: target?.name,
+    };
+  }
+
+  if (path?.action === 'review_prerequisites') {
+    const target = findWeakestPrerequisite(subjectId, concept, progressById);
+    return {
+      action: path.action,
+      message: path.message,
+      conceptId: target?.id,
+      conceptName: target?.name,
+    };
+  }
+
+  if (path) {
+    return { action: path.action, message: path.message };
+  }
+
+  const target = findWeakestPrerequisite(subjectId, concept, progressById);
+  if (!target) return undefined;
+
+  return {
+    action: 'review_prerequisites',
+    message: `Let's revisit ${target.name} first — it's what this concept builds on.`,
+    conceptId: target.id,
+    conceptName: target.name,
+  };
 }
 
 // ── On-demand lesson resolution ──────────────────────────────────────────────
