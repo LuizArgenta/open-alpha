@@ -195,28 +195,33 @@ function findUnverifiedPrerequisite(
 }
 
 /**
- * The prerequisite most likely to be the actual blocker: one never attempted,
- * otherwise the one with the lowest mastery.
+ * The weakest *direct* prerequisite: never attempted first, otherwise lowest
+ * mastery. Deliberately does not walk further up the chain — an authored
+ * remediation message names the concept right below this one, so pointing the
+ * student at a distant ancestor would contradict the text they are reading.
  */
 function findWeakestPrerequisite(
   subjectId: string,
   concept: Concept,
   progressById: Map<string, ProgressRecord>
 ): Concept | undefined {
-  const unverified = findUnverifiedPrerequisite(subjectId, concept, progressById);
-  if (unverified) return unverified;
-
   let weakest: Concept | undefined;
   let weakestScore = Infinity;
+
   for (const prerequisiteId of concept.prerequisites) {
     const prerequisite = getConcept(subjectId, prerequisiteId);
+    if (!prerequisite) continue;
+
+    // Never attempted is weaker than any score.
     const record = progressById.get(prerequisiteId);
-    if (!prerequisite || !record) continue;
-    if (record.masteryScore < weakestScore) {
+    const score = record ? record.masteryScore : -1;
+
+    if (score < weakestScore) {
       weakest = prerequisite;
-      weakestScore = record.masteryScore;
+      weakestScore = score;
     }
   }
+
   return weakest;
 }
 
