@@ -182,6 +182,12 @@ For production (Vercel):
 - `ATXP_CONNECTION_STRING` - ATXP LLM Gateway credentials
 - `JWT_SECRET` - Secret for signing auth tokens
 - `ADMIN_INIT_KEY` - Key for database initialization endpoint
+- `CURRICULUM_REQUIRE_DATABASE` - Set to `true` to refuse to start when the
+  curriculum cannot be read from the database. Off by default so a fresh
+  install boots on the seed files; a school in operation should turn it on,
+  because teaching from a curriculum nobody published is worse than an
+  outage. Either way, `GET /api/health/curriculum` answers 503 while the
+  instance is degraded.
 
 ### Contributing
 

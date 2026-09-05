@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../App';
 import { useServerText, useTranslation } from '../i18n';
+import CurriculumHealthBanner from '../components/CurriculumHealthBanner';
 
 interface SubjectSummary {
   id: string;
@@ -92,6 +93,8 @@ export default function AdminCurriculum() {
 
   return (
     <div className="container" style={{ padding: '2rem 1rem', display: 'grid', gap: '1.5rem', gridTemplateColumns: 'minmax(220px, 300px) 1fr' }}>
+      <CurriculumHealthBanner />
+
       <section>
         <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.75rem' }}>{t('admin.subjects')}</h3>
 

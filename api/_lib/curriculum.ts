@@ -255,23 +255,122 @@ export async function importCurriculumFromFiles(): Promise<{ subjects: number; c
 }
 
 /**
- * Database first, files second. A database that is empty (fresh install) or
- * unreachable must not take the whole application down at module load, and
- * the files are always a valid curriculum.
+ * Where the curriculum in memory came from, and whether that is where it was
+ * supposed to come from.
+ *
+ * The fallback used to be silent: a database failure in production served the
+ * seed files and nobody knew. That is the worst shape a failure can take here.
+ * The files are a *valid* curriculum, so nothing crashes and nothing looks
+ * wrong — while every tree an admin authored at runtime has vanished, students
+ * are being taught from a curriculum nobody chose, and progress rows point at
+ * concepts the running graph no longer contains. A crash would have been
+ * noticed in minutes; this can run for weeks.
  */
-async function resolveSubjects(): Promise<Subject[]> {
-  try {
-    const fromDatabase = await loadSubjectsFromDatabase();
-    if (fromDatabase.length > 0) return fromDatabase;
-  } catch (error) {
-    console.error('Curriculum load from database failed, falling back to files:', error);
+export type CurriculumOrigin = 'database' | 'files';
+
+export type CurriculumDegradation =
+  /** The database answered, and had no published curriculum in it. */
+  | 'database_empty'
+  /** The database could not be read at all. */
+  | 'database_error';
+
+export interface CurriculumStatus {
+  origin: CurriculumOrigin;
+  /** True whenever the files are being served in the database's place. */
+  degraded: boolean;
+  reason?: CurriculumDegradation;
+  /** The failure, kept for whoever has to fix it. Never shown to students. */
+  error?: string;
+  loadedAt: string;
+  subjects: number;
+  concepts: number;
+}
+
+function countConcepts(loaded: Subject[]): number {
+  return loaded.reduce((total, subject) => total + subject.concepts.length, 0);
+}
+
+/**
+ * Set when serving the files is not acceptable — a school in operation would
+ * rather be down than teach from a curriculum nobody chose. Off by default so
+ * a fresh install and the test suite still boot.
+ */
+function databaseIsRequired(): boolean {
+  return process.env.CURRICULUM_REQUIRE_DATABASE === 'true';
+}
+
+export class CurriculumUnavailableError extends Error {
+  constructor(reason: CurriculumDegradation, cause?: unknown) {
+    super(
+      reason === 'database_empty'
+        ? 'Curriculum database is empty and CURRICULUM_REQUIRE_DATABASE is set. Run the import before serving.'
+        : `Curriculum database is unreadable and CURRICULUM_REQUIRE_DATABASE is set: ${String(cause)}`
+    );
+    this.name = 'CurriculumUnavailableError';
   }
-  return loadSubjectsFromFiles();
+}
+
+/**
+ * Database first, files second — but never quietly. A fresh install and a
+ * production outage both end up on the files; only the second one is an
+ * emergency, and the difference has to be legible from outside the process.
+ */
+export async function resolveCurriculum(): Promise<{ loaded: Subject[]; status: CurriculumStatus }> {
+  const at = new Date().toISOString();
+
+  const degrade = (reason: CurriculumDegradation, cause?: unknown): { loaded: Subject[]; status: CurriculumStatus } => {
+    if (databaseIsRequired()) throw new CurriculumUnavailableError(reason, cause);
+
+    const loaded = loadSubjectsFromFiles();
+    // Deliberately loud and greppable: this line is the only warning anyone
+    // gets before students start seeing a curriculum nobody published.
+    console.error(
+      `[CURRICULUM_DEGRADED] serving ${loaded.length} subjects from files instead of the database (${reason})`,
+      cause ?? ''
+    );
+    return {
+      loaded,
+      status: {
+        origin: 'files',
+        degraded: true,
+        reason,
+        error: cause === undefined ? undefined : String(cause),
+        loadedAt: at,
+        subjects: loaded.length,
+        concepts: countConcepts(loaded),
+      },
+    };
+  };
+
+  let fromDatabase: Subject[];
+  try {
+    fromDatabase = await loadSubjectsFromDatabase();
+  } catch (error) {
+    return degrade('database_error', error);
+  }
+
+  if (fromDatabase.length === 0) return degrade('database_empty');
+
+  return {
+    loaded: fromDatabase,
+    status: {
+      origin: 'database',
+      degraded: false,
+      loadedAt: at,
+      subjects: fromDatabase.length,
+      concepts: countConcepts(fromDatabase),
+    },
+  };
 }
 
 // Loaded once per instance, at module evaluation, so every read below stays
 // synchronous for its callers.
-export const subjects: Subject[] = await resolveSubjects();
+const resolved = await resolveCurriculum();
+
+export const subjects: Subject[] = resolved.loaded;
+
+/** What the load actually did. Read by the health endpoint and the tests. */
+export const curriculumStatus: CurriculumStatus = resolved.status;
 
 export function getSubject(subjectId: string): Subject | undefined {
   return subjects.find(s => s.id === subjectId);
