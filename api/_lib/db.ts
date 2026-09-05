@@ -67,6 +67,8 @@ export async function initializeSchema(): Promise<void> {
       attempts INTEGER DEFAULT 0,
       last_attempt_at TEXT,
       completed_at TEXT,
+      next_review_at TEXT,
+      review_interval_days INTEGER,
       UNIQUE(student_id, subject, concept_id)
     );
 
@@ -183,6 +185,9 @@ export async function initializeSchema(): Promise<void> {
   const migrations = [
     'ALTER TABLE users ADD COLUMN atxp_account_id TEXT',
     'ALTER TABLE users ADD COLUMN atxp_connection_token TEXT',
+    // Spaced review scheduling
+    'ALTER TABLE progress ADD COLUMN next_review_at TEXT',
+    'ALTER TABLE progress ADD COLUMN review_interval_days INTEGER',
     // Contribution system tables (added after initial launch)
     `CREATE TABLE IF NOT EXISTS contributions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
