@@ -323,6 +323,10 @@ export async function initializeSchema(): Promise<void> {
       subject TEXT NOT NULL,
       concept_id TEXT NOT NULL,
       language TEXT NOT NULL DEFAULT 'en',
+      -- A mastery check is about one concept; a placement probe spans a
+      -- subject, and stores '*' as its concept because none of them is the
+      -- one being assessed. Each item carries the concept it belongs to.
+      kind TEXT NOT NULL DEFAULT 'mastery' CHECK (kind IN ('mastery', 'placement')),
       score INTEGER,
       started_at TEXT DEFAULT (datetime('now')),
       finished_at TEXT,
@@ -405,6 +409,8 @@ export async function initializeSchema(): Promise<void> {
     'ALTER TABLE users ADD COLUMN atxp_connection_token TEXT',
     // Content hash of a published concept, to keep version meaningful
     'ALTER TABLE curriculum_concepts ADD COLUMN content_hash TEXT',
+    // What an attempt is assessing: one concept, or where to start
+    "ALTER TABLE assessment_attempts ADD COLUMN kind TEXT NOT NULL DEFAULT 'mastery'",
     // Attempts that timed out instead of being submitted
     'ALTER TABLE assessment_attempts ADD COLUMN expired_at TEXT',
     // Spaced review scheduling

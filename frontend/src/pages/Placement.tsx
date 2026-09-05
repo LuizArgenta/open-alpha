@@ -5,6 +5,7 @@ import { pluralKey, useTranslation } from '../i18n';
 import Spinner from '../components/Spinner';
 
 interface ProbeItem {
+  itemId: number;
   conceptId: string;
   question: string;
   options: string[];
@@ -19,9 +20,12 @@ export default function Placement() {
   const [items, setItems] = useState<ProbeItem[] | null>(null);
   const [available, setAvailable] = useState(true);
   const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<{ conceptId: string; chosen: string }[]>([]);
+  // The attempt is the whole submission: which concept an answer counts for is
+  // the server's record, not something the page gets to assert.
+  const [attemptId, setAttemptId] = useState<number | null>(null);
   const [placedCount, setPlacedCount] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [expired, setExpired] = useState(false);
 
   useEffect(() => {
     fetch(`/api/tutor/placement/${subject}`, {
@@ -31,14 +35,27 @@ export default function Placement() {
       .then(data => {
         setAvailable(data.available !== false);
         setItems(data.items ?? []);
+        setAttemptId(data.attemptId ?? null);
       })
       .catch(() => setItems([]));
   }, [subject, token]);
 
   async function choose(option: string) {
     const item = items![index];
-    const next = [...answers, { conceptId: item.conceptId, chosen: option.charAt(0) }];
-    setAnswers(next);
+
+    // Graded and recorded one item at a time, through the same endpoint the
+    // mastery check uses.
+    const answered = await fetch('/api/tutor/quiz/answer', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attemptId, itemId: item.itemId, chosen: option.charAt(0) }),
+    });
+
+    if (answered.status === 410) {
+      setExpired(true);
+      return;
+    }
+    if (!answered.ok) return; // let them try again rather than losing the item
 
     if (index < items!.length - 1) {
       setIndex(index + 1);
@@ -50,8 +67,12 @@ export default function Placement() {
       const res = await fetch(`/api/tutor/placement/${subject}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: next }),
+        body: JSON.stringify({ attemptId }),
       });
+      if (res.status === 410) {
+        setExpired(true);
+        return;
+      }
       const data = await res.json();
       setPlacedCount(data.placed?.length ?? 0);
     } catch {
@@ -69,6 +90,19 @@ export default function Placement() {
     margin: '3rem auto',
     padding: '0 1rem',
   } as const;
+
+  if (expired) {
+    return (
+      <div style={card}>
+        <div className="card">
+          <p style={{ marginBottom: '1rem' }}>{t('placement.expired')}</p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>
+            {t('quiz.expiredRestart')}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!available || items.length === 0) {
     return (
