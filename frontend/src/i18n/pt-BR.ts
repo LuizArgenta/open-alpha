@@ -87,6 +87,10 @@ export const ptBR = {
   'learn.advanceBanner': 'Boa! Seguindo para {concept}...',
 
   // ── Quiz ──────────────────────────────────────────────────────────────────
+  'curriculumHealth.title': 'Os alunos não estão sendo ensinados por este currículo',
+  'curriculumHealth.databaseEmpty': 'Não há currículo publicado no banco, então o app está servindo os arquivos de origem. Rode a importação para que o que você edita aqui seja o que os alunos veem.',
+  'curriculumHealth.databaseError': 'Não foi possível ler o currículo no banco, então o app está servindo os arquivos de origem. Nada do que for criado aqui chega aos alunos até isso se restabelecer.',
+  'curriculumHealth.serving': 'Servindo agora {subjects} matérias e {concepts} conceitos vindos de arquivos.',
   'quiz.generating': 'Preparando a prova...',
   'quiz.loadError': 'Não foi possível carregar a prova',
   'quiz.correct': 'Certo!',
