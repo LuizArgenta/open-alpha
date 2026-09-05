@@ -36,7 +36,7 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
 - [ ] **8. Sessão: token curto, rotação, revogação, logout global** *(M)* — hoje o token vale 7 dias e não há como revogar.
 - [ ] **9. Sair do localStorage para cookie HttpOnly + CSRF** *(G)* — **fazer isolado.** Toca toda chamada autenticada do frontend; um erro aqui derruba o login de todo mundo.
 - [ ] **10. Varredura de IDOR/BOLA** *(M)* — feito para pai/filho e tentativas; falta progresso, sessões, interesses e coach.
-- [ ] **11. CSP, HSTS, frame-ancestors, CORS explícito** *(P)* — `api/curriculum/lesson.ts` está com `Access-Control-Allow-Origin: *`.
+- [ ] **11. CSP, HSTS, frame-ancestors, CORS explícito** *(P)* — implementado na branch `claude/plano-execucao-review-qt3hkk`, aguardando PR e merge. `vercel.json` passa a enviar CSP (`default-src 'self'`, sem `unsafe-inline` nem wildcard), HSTS com preload, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` e `Permissions-Policy` em toda resposta, com teste de regressão em `tests/security-headers.test.ts`. O `Access-Control-Allow-Origin: *` citado aqui **não era o problema**: `api/curriculum/lesson.ts` e os outros seis endpoints com o mesmo header (`curriculum/graph`, `curriculum/gaps`, `contribute/lesson`, `contribute/quiz`, `quality/review`, `quality/review-queue`) são de propósito público — conteúdo do currículo e a API de contribuição para agentes, documentados como tal no próprio arquivo. Nenhum endpoint com dado privado ou autenticado usa CORS aberto hoje.
 - [ ] **12. Dependabot, CodeQL, secret scanning, actions fixadas por SHA** *(P)* — metade é configuração de repositório.
 
 ## Marco 2 — Tutor local confiável
