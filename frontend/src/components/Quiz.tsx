@@ -1,21 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../App';
 import Spinner from './Spinner';
 import { useServerText, useTranslation } from '../i18n';
 
 interface Question {
-  itemId?: number;
+  itemId: number;
   question: string;
   options: string[];
-  correctAnswer: string;
-  explanation: string;
 }
 
-interface AnsweredItem {
-  itemId?: number;
-  chosen: string;
+/** What the server says about the answer just given. */
+interface Verdict {
   correct: boolean;
-  responseTimeMs: number;
+  correctAnswer: string;
+  explanation: string | null;
 }
 
 interface Remediation {
@@ -53,10 +51,10 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   const [finished, setFinished] = useState(false);
   const [remediation, setRemediation] = useState<Remediation | null>(null);
   const [xp, setXp] = useState<{ amount: number; reason: string } | null>(null);
+  const [serverScore, setServerScore] = useState<number | null>(null);
+  const [grading, setGrading] = useState(false);
   const [attemptId, setAttemptId] = useState<number | null>(null);
-  // Kept in a ref, not state: handleNext reads it in the same tick the last
-  // answer is recorded, and a state update would not have landed yet.
-  const answered = useRef<AnsweredItem[]>([]);
+  const [verdict, setVerdict] = useState<Verdict | null>(null);
 
   useEffect(() => {
     fetchQuiz();
@@ -85,7 +83,6 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
       if (data.questions && data.questions.length > 0) {
         setQuestions(data.questions);
         setAttemptId(data.attemptId ?? null);
-        answered.current = [];
         // Track quiz start
         fetch('/api/progress/events', {
           method: 'POST',
@@ -105,26 +102,21 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
     }
   }
 
-  async function submitResults(score: number) {
+  async function submitResults() {
     try {
+      // The attempt is the whole payload: the score is the server's to
+      // compute from the answers it graded.
       const res = await fetch('/api/tutor/quiz/submit', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          subject,
-          conceptId,
-          score,
-          totalQuestions: questions.length,
-          correctAnswers: correctCount,
-          attemptId,
-          responses: answered.current,
-        }),
+        body: JSON.stringify({ attemptId }),
       });
 
       const data = await res.json();
+      if (data.masteryScore !== undefined) setServerScore(data.masteryScore);
       if (data.remediation) setRemediation(data.remediation);
       if (data.xp) setXp(data.xp);
     } catch (error) {
@@ -139,38 +131,42 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
     setQuestionStartTime(Date.now());
   }, [currentIndex]);
 
-  function handleAnswer(answer: string) {
-    if (showExplanation) return;
+  /**
+   * The browser no longer knows the answer, so it asks. The round trip is
+   * what makes the score trustworthy; the feedback arrives with the reply.
+   */
+  async function handleAnswer(answer: string) {
+    if (showExplanation || grading) return;
+
     setSelectedAnswer(answer);
-    setShowExplanation(true);
+    setGrading(true);
 
-    const correct = answer === questions[currentIndex].correctAnswer;
-    if (correct) {
-      setCorrectCount((prev) => prev + 1);
-    }
-
-    // Track each answer for waste meter (rapid guess detection)
     const responseTimeMs = Date.now() - questionStartTime;
 
-    answered.current.push({
-      itemId: questions[currentIndex].itemId,
-      chosen: answer,
-      correct,
-      responseTimeMs,
-    });
-    fetch('/api/progress/events', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        subject,
-        conceptId,
-        eventType: 'quiz_answer',
-        payload: { correct, responseTimeMs, questionIndex: currentIndex },
-      }),
-    }).catch(() => {/* non-critical */});
+    try {
+      const res = await fetch('/api/tutor/quiz/answer', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attemptId,
+          itemId: questions[currentIndex].itemId,
+          chosen: answer,
+          responseTimeMs,
+        }),
+      });
+
+      if (!res.ok) throw new Error('grading failed');
+
+      const result = await res.json() as Verdict;
+      setVerdict(result);
+      setShowExplanation(true);
+      if (result.correct) setCorrectCount(prev => prev + 1);
+    } catch {
+      // Let them try again rather than recording an answer nobody graded.
+      setSelectedAnswer(null);
+    } finally {
+      setGrading(false);
+    }
   }
 
   function handleNext() {
@@ -178,11 +174,10 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
       setCurrentIndex((prev) => prev + 1);
       setSelectedAnswer(null);
       setShowExplanation(false);
+      setVerdict(null);
     } else {
-      // Quiz complete - correctCount already includes the last answer from handleAnswer
-      const score = Math.round((correctCount / questions.length) * 100);
       setFinished(true);
-      submitResults(score);
+      submitResults();
     }
   }
 
@@ -213,7 +208,9 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   }
 
   if (finished) {
-    const score = Math.round((correctCount / questions.length) * 100);
+    // The server's number, not a local tally, so what is shown is what was
+    // recorded.
+    const score = serverScore ?? Math.round((correctCount / questions.length) * 100);
     const passed = score >= 80;
 
     return (
@@ -312,7 +309,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   }
 
   const question = questions[currentIndex];
-  const isCorrect = selectedAnswer === question.correctAnswer;
+  const isCorrect = verdict?.correct ?? false;
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1.5rem', overflow: 'auto' }}>
@@ -348,7 +345,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
         {question.options.map((option, index) => {
           const letter = option.charAt(0);
           const isSelected = selectedAnswer === letter;
-          const isCorrectOption = letter === question.correctAnswer;
+          const isCorrectOption = showExplanation && letter === verdict?.correctAnswer;
 
           let background = 'var(--surface)';
           let borderColor = 'var(--border)';
@@ -369,7 +366,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
             <button
               key={index}
               onClick={() => handleAnswer(letter)}
-              disabled={showExplanation}
+              disabled={showExplanation || grading}
               style={{
                 textAlign: 'left',
                 padding: '1rem',
@@ -399,7 +396,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
           <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
             {isCorrect ? t('quiz.correct') : t('quiz.incorrect')}
           </p>
-          <p>{question.explanation}</p>
+          <p>{verdict?.explanation}</p>
           {!isCorrect && onReviewLesson && (
             <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(239,68,68,0.25)' }}>
               <button

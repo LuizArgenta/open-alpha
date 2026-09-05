@@ -7,9 +7,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { executeSql, initializeSchema } from '../api/_lib/db.js';
 import { signToken } from '../api/_lib/auth.js';
-import { POST as submitQuiz } from '../api/tutor/quiz/submit.js';
 import { recordDecision } from '../api/_lib/decisions.js';
-import { createUser, resetDatabase } from './helpers/database.js';
+import { createUser, resetDatabase, takeQuiz } from './helpers/database.js';
 
 const SUBJECT = 'math';
 const CONCEPT = 'math-fractions-intro';
@@ -41,15 +40,9 @@ async function openAttempt(): Promise<number> {
   return row.rows[0].id;
 }
 
-async function submit(body: Record<string, unknown>) {
-  const response = await submitQuiz(
-    new Request('https://test.local/api/tutor/quiz/submit', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ subject: SUBJECT, conceptId: CONCEPT, ...body }),
-    })
-  );
-  return response.json() as Promise<any>;
+/** Sits the quiz for real, answering `correct` of the five questions right. */
+async function submit(correct: number) {
+  return takeQuiz(token, SUBJECT, CONCEPT, correct);
 }
 
 beforeEach(async () => {
@@ -60,58 +53,39 @@ beforeEach(async () => {
 
 describe('assessment evidence', () => {
   it('keeps which item was answered and how, not just the score', async () => {
-    const items = await seedItems(2);
-    const attemptId = await openAttempt();
+    await submit(3);
 
-    await submit({
-      score: 50,
-      attemptId,
-      responses: [
-        { itemId: items[0], chosen: 'A', correct: true, responseTimeMs: 8000 },
-        { itemId: items[1], chosen: 'B', correct: false, responseTimeMs: 12000 },
-      ],
-    });
-
-    const stored = await executeSql<{ item_id: number; chosen: string; correct: number; response_ms: number }>(
-      'SELECT item_id, chosen, correct, response_ms FROM assessment_responses ORDER BY item_id'
+    const stored = await executeSql<{ item_id: number; chosen: string; correct: number }>(
+      'SELECT item_id, chosen, correct FROM assessment_responses ORDER BY item_id'
     );
 
-    expect(stored.rows).toHaveLength(2);
-    expect(stored.rows[0]).toMatchObject({ item_id: items[0], chosen: 'A', correct: 1, response_ms: 8000 });
-    expect(stored.rows[1]).toMatchObject({ item_id: items[1], chosen: 'B', correct: 0 });
+    expect(stored.rows).toHaveLength(5);
+    expect(stored.rows.filter(row => row.correct === 1)).toHaveLength(3);
+    expect(stored.rows.every(row => row.chosen !== null)).toBe(true);
   });
 
-  it('closes the attempt with its score', async () => {
-    const items = await seedItems(1);
-    const attemptId = await openAttempt();
-
-    await submit({
-      score: 100,
-      attemptId,
-      responses: [{ itemId: items[0], chosen: 'A', correct: true, responseTimeMs: 9000 }],
-    });
+  it('closes the attempt with the score the server computed', async () => {
+    await submit(5);
 
     const attempt = await executeSql<{ score: number; finished_at: string | null }>(
-      'SELECT score, finished_at FROM assessment_attempts WHERE id = $1',
-      [attemptId]
+      'SELECT score, finished_at FROM assessment_attempts ORDER BY id DESC LIMIT 1'
     );
 
     expect(attempt.rows[0].score).toBe(100);
     expect(attempt.rows[0].finished_at).not.toBeNull();
   });
 
-  it('still accepts a submission with no attempt, so older clients keep working', async () => {
-    const result = await submit({ score: 100 });
+  it('records a response for every question that was answered', async () => {
+    await submit(5);
 
-    expect(result.passed).toBe(true);
     const responses = await executeSql('SELECT id FROM assessment_responses');
-    expect(responses.rows).toHaveLength(0);
+    expect(responses.rows).toHaveLength(5);
   });
 });
 
 describe('decision log', () => {
   it('records the diagnosis, the XP award and the remediation of a failed attempt', async () => {
-    await submit({ score: 20 });
+    await submit(1);
 
     const decisions = await executeSql<{ kind: string; decision: string; reason: string }>(
       'SELECT kind, decision, reason FROM learning_decisions ORDER BY kind'
@@ -124,7 +98,7 @@ describe('decision log', () => {
   });
 
   it('records why a review was scheduled', async () => {
-    await submit({ score: 100 });
+    await submit(5);
 
     const scheduled = await executeSql<{ decision: string; reason: string; inputs: string }>(
       `SELECT decision, reason, inputs FROM learning_decisions WHERE kind = 'review_schedule'`
@@ -136,8 +110,8 @@ describe('decision log', () => {
   });
 
   it('distinguishes a lapse from a pass when rescheduling', async () => {
-    await submit({ score: 100 });
-    await submit({ score: 30 });
+    await submit(5);
+    await submit(1);
 
     const reasons = await executeSql<{ reason: string }>(
       `SELECT reason FROM learning_decisions WHERE kind = 'review_schedule' ORDER BY id`

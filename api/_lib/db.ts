@@ -277,6 +277,16 @@ export async function initializeSchema(): Promise<void> {
       finished_at TEXT
     );
 
+    -- Which items an attempt is made of, and in what order. Without this the
+    -- server cannot tell whether a submitted answer belongs to the attempt
+    -- claiming it.
+    CREATE TABLE IF NOT EXISTS assessment_attempt_items (
+      attempt_id INTEGER NOT NULL REFERENCES assessment_attempts(id),
+      item_id INTEGER NOT NULL REFERENCES assessment_items(id),
+      position INTEGER NOT NULL,
+      PRIMARY KEY (attempt_id, item_id)
+    );
+
     CREATE TABLE IF NOT EXISTS assessment_responses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       attempt_id INTEGER REFERENCES assessment_attempts(id),
@@ -284,7 +294,8 @@ export async function initializeSchema(): Promise<void> {
       chosen TEXT,
       correct INTEGER NOT NULL,
       response_ms INTEGER,
-      answered_at TEXT DEFAULT (datetime('now'))
+      answered_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(attempt_id, item_id)
     );
 
     -- What the engine decided about a student, and on what grounds
@@ -395,6 +406,12 @@ export async function initializeSchema(): Promise<void> {
       score INTEGER,
       started_at TEXT DEFAULT (datetime('now')),
       finished_at TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS assessment_attempt_items (
+      attempt_id INTEGER NOT NULL REFERENCES assessment_attempts(id),
+      item_id INTEGER NOT NULL REFERENCES assessment_items(id),
+      position INTEGER NOT NULL,
+      PRIMARY KEY (attempt_id, item_id)
     )`,
     `CREATE TABLE IF NOT EXISTS assessment_responses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
