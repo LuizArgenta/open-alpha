@@ -85,9 +85,36 @@ export interface Subject {
   concepts: Concept[];
 }
 
-// ── Loader ────────────────────────────────────────────────────────────────────
+// ── Loading ───────────────────────────────────────────────────────────────────
+//
+// The curriculum lives in the database so it can be authored at runtime, and
+// the JSON files remain its seed and its fallback. Reading stays synchronous:
+// this module is the seam every consumer goes through, and making it async
+// would spread `await` across all of them for no gain. The graph is loaded
+// once per serverless instance, exactly as the file loader always did.
 
-function loadSubjects(): Subject[] {
+/** Shape of the enriched fields, as stored and as authored. */
+const ENRICHED_FIELDS = [
+  'objective',
+  'explanation',
+  'alternateExplanations',
+  'workedExamples',
+  'guidedPractice',
+  'masteryCheck',
+  'remediationPath',
+  'whyItMatters',
+  'metadata',
+] as const;
+
+function pickEnriched(source: Record<string, unknown>): Record<string, unknown> {
+  const content: Record<string, unknown> = {};
+  for (const field of ENRICHED_FIELDS) {
+    if (source[field] !== undefined) content[field] = source[field];
+  }
+  return content;
+}
+
+export function loadSubjectsFromFiles(): Subject[] {
   const curriculumDir = join(process.cwd(), 'curriculum');
   // Only load files that are subject definitions (have a concepts array).
   // Exclude any *schema*.json files (schema.json, contribution-schema.json, etc.)
@@ -127,8 +154,124 @@ function loadSubjects(): Subject[] {
   return result;
 }
 
-// Load once at startup
-export const subjects: Subject[] = loadSubjects();
+interface ConceptRow {
+  subject_id: string;
+  concept_id: string;
+  name: string;
+  description: string | null;
+  level: number;
+  prerequisites: string;
+  content: string;
+}
+
+interface SubjectRow {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+/** Published curriculum from the database. Empty when nothing is seeded yet. */
+export async function loadSubjectsFromDatabase(): Promise<Subject[]> {
+  const subjectRows = await executeSql<SubjectRow>(
+    `SELECT id, name, description FROM curriculum_subjects WHERE status = 'published' ORDER BY id`
+  );
+  if (subjectRows.rows.length === 0) return [];
+
+  const conceptRows = await executeSql<ConceptRow>(
+    `SELECT subject_id, concept_id, name, description, level, prerequisites, content
+     FROM curriculum_concepts WHERE status = 'published'
+     ORDER BY subject_id, level, concept_id`
+  );
+
+  const bySubject = new Map<string, Concept[]>();
+  for (const row of conceptRows.rows) {
+    const concept: Concept = {
+      id: row.concept_id,
+      name: row.name,
+      description: row.description ?? '',
+      prerequisites: JSON.parse(row.prerequisites || '[]'),
+      gradeLevel: row.level,
+      ...(JSON.parse(row.content || '{}') as Partial<Concept>),
+    };
+    bySubject.set(row.subject_id, [...(bySubject.get(row.subject_id) ?? []), concept]);
+  }
+
+  return subjectRows.rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    description: row.description ?? '',
+    concepts: bySubject.get(row.id) ?? [],
+  }));
+}
+
+/**
+ * Copies the JSON files into the database. Idempotent: re-running overwrites
+ * what the files define and leaves anything authored elsewhere alone.
+ */
+export async function importCurriculumFromFiles(): Promise<{ subjects: number; concepts: number }> {
+  const fromFiles = loadSubjectsFromFiles();
+  let conceptCount = 0;
+
+  for (const subject of fromFiles) {
+    await executeSql(
+      `INSERT INTO curriculum_subjects (id, name, description, status)
+       VALUES ($1, $2, $3, 'published')
+       ON CONFLICT(id) DO UPDATE SET
+         name = EXCLUDED.name,
+         description = EXCLUDED.description,
+         updated_at = datetime('now')`,
+      [subject.id, subject.name, subject.description]
+    );
+
+    for (const concept of subject.concepts) {
+      const { id, name, description, prerequisites, gradeLevel, ...enriched } = concept;
+      await executeSql(
+        `INSERT INTO curriculum_concepts
+           (subject_id, concept_id, name, description, level, prerequisites, content, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'published')
+         ON CONFLICT(subject_id, concept_id) DO UPDATE SET
+           name = EXCLUDED.name,
+           description = EXCLUDED.description,
+           level = EXCLUDED.level,
+           prerequisites = EXCLUDED.prerequisites,
+           content = EXCLUDED.content,
+           version = curriculum_concepts.version + 1,
+           updated_at = datetime('now')`,
+        [
+          subject.id,
+          id,
+          name,
+          description,
+          gradeLevel,
+          JSON.stringify(prerequisites),
+          JSON.stringify(pickEnriched(enriched as Record<string, unknown>)),
+        ]
+      );
+      conceptCount++;
+    }
+  }
+
+  return { subjects: fromFiles.length, concepts: conceptCount };
+}
+
+/**
+ * Database first, files second. A database that is empty (fresh install) or
+ * unreachable must not take the whole application down at module load, and
+ * the files are always a valid curriculum.
+ */
+async function resolveSubjects(): Promise<Subject[]> {
+  try {
+    const fromDatabase = await loadSubjectsFromDatabase();
+    if (fromDatabase.length > 0) return fromDatabase;
+  } catch (error) {
+    console.error('Curriculum load from database failed, falling back to files:', error);
+  }
+  return loadSubjectsFromFiles();
+}
+
+// Loaded once per instance, at module evaluation, so every read below stays
+// synchronous for its callers.
+export const subjects: Subject[] = await resolveSubjects();
 
 export function getSubject(subjectId: string): Subject | undefined {
   return subjects.find(s => s.id === subjectId);

@@ -22,6 +22,11 @@ const TABLES_IN_DEPENDENCY_ORDER = [
   'user_interests',
   'parent_links',
   'users',
+  // Cleared too, so a run never inherits a curriculum imported by an earlier
+  // one: every test file loads the curriculum when it imports curriculum.js,
+  // and leftovers there change what the engine reads.
+  'curriculum_concepts',
+  'curriculum_subjects',
 ];
 
 export async function resetDatabase(): Promise<void> {

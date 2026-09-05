@@ -209,6 +209,34 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Curriculum as data, so it can be authored at runtime instead of only
+    -- by editing files and redeploying
+    CREATE TABLE IF NOT EXISTS curriculum_subjects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'in_review', 'published')),
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS curriculum_concepts (
+      subject_id TEXT NOT NULL REFERENCES curriculum_subjects(id),
+      concept_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      level INTEGER NOT NULL,
+      prerequisites TEXT NOT NULL DEFAULT '[]',
+      -- The enriched bundle (explanation, examples, mastery check...) kept as
+      -- authored. It is nested and it is always read whole.
+      content TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'in_review', 'published')),
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (subject_id, concept_id)
+    );
+
     -- Every question a student was actually shown, kept so a mastery decision
     -- can be reconstructed after the fact
     CREATE TABLE IF NOT EXISTS assessment_items (
@@ -303,6 +331,28 @@ export async function initializeSchema(): Promise<void> {
     // How a mastery estimate was arrived at, and how much to trust it
     "ALTER TABLE progress ADD COLUMN mastery_source TEXT DEFAULT 'quiz'",
     'ALTER TABLE progress ADD COLUMN mastery_confidence REAL DEFAULT 1.0',
+    `CREATE TABLE IF NOT EXISTS curriculum_subjects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'in_review', 'published')),
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS curriculum_concepts (
+      subject_id TEXT NOT NULL REFERENCES curriculum_subjects(id),
+      concept_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      level INTEGER NOT NULL,
+      prerequisites TEXT NOT NULL DEFAULT '[]',
+      content TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'in_review', 'published')),
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (subject_id, concept_id)
+    )`,
     `CREATE TABLE IF NOT EXISTS assessment_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       subject_id TEXT NOT NULL,
