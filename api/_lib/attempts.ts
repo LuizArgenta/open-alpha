@@ -1,0 +1,61 @@
+/**
+ * The lifetime of an open assessment attempt.
+ *
+ * An attempt used to stay open forever: a student could open a quiz, close the
+ * tab, look the answers up, and come back the next day to submit. Everything
+ * the engine infers from an attempt — mastery, the pace signals that separate
+ * "rushed" from "has a real gap", the review schedule — assumes the attempt
+ * happened in one sitting.
+ *
+ * Two hours is deliberately generous. A child who steps away for lunch should
+ * come back to the same quiz; a child who comes back tomorrow should get a
+ * fresh one. Nothing is lost by expiring: the answers already graded stay on
+ * the attempt as evidence, and a new attempt costs a click.
+ */
+
+import { executeSql } from './db.js';
+
+export const ATTEMPT_LIFETIME_MINUTES = 120;
+
+/** For `datetime('now', ...)`: the moment before which an attempt is stale. */
+export const ATTEMPT_DEADLINE_MODIFIER = `-${ATTEMPT_LIFETIME_MINUTES} minutes`;
+
+/**
+ * Closes attempts this student left open past the deadline.
+ *
+ * Serverless has no cron to sweep with, so the sweep rides on the next thing
+ * the student does. `expired_at` distinguishes an attempt that timed out from
+ * one that was submitted: a finished attempt with no score would otherwise be
+ * indistinguishable from a bug.
+ */
+export async function expireStaleAttempts(studentId: number): Promise<number> {
+  const result = await executeSql(
+    `UPDATE assessment_attempts
+     SET expired_at = datetime('now'), finished_at = datetime('now')
+     WHERE student_id = $1 AND finished_at IS NULL AND started_at < datetime('now', $2)`,
+    [studentId, ATTEMPT_DEADLINE_MODIFIER]
+  );
+  return result.rowCount;
+}
+
+/**
+ * Expires one attempt on the spot. Called when a request arrives for an
+ * attempt that is already past its deadline, so the row reflects why the
+ * request was refused.
+ */
+export async function expireAttempt(attemptId: number): Promise<void> {
+  await executeSql(
+    `UPDATE assessment_attempts
+     SET expired_at = datetime('now'), finished_at = datetime('now')
+     WHERE id = $1 AND finished_at IS NULL`,
+    [attemptId]
+  );
+}
+
+/** 410: the attempt existed and is gone, which is exactly what happened. */
+export function attemptExpired(): Response {
+  return Response.json(
+    { error: 'Attempt expired', expiredAfterMinutes: ATTEMPT_LIFETIME_MINUTES },
+    { status: 410 }
+  );
+}

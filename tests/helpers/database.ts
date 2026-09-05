@@ -58,6 +58,43 @@ export async function linkParentToChild(parentId: number, childId: number): Prom
   );
 }
 
+/** Calls an endpoint handler as a signed-in user. */
+export function callAs(
+  token: string,
+  handler: (request: Request) => Promise<Response>,
+  body: unknown
+): Promise<Response> {
+  return handler(new Request('https://test.local/api', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
+}
+
+export interface OpenQuiz {
+  attemptId: number;
+  questions: { itemId: number }[];
+}
+
+/** Opens an attempt without answering it, for tests about what happens next. */
+export async function openQuiz(
+  token: string,
+  subject: string,
+  conceptId: string
+): Promise<OpenQuiz> {
+  const { POST: buildQuiz } = await import('../../api/tutor/quiz.js');
+  return (await callAs(token, buildQuiz, { subject, conceptId })).json() as Promise<OpenQuiz>;
+}
+
+/** The stored answer key, which only the server is supposed to know. */
+export async function answerKey(itemId: number): Promise<string> {
+  const key = await executeSql<{ correct_answer: string }>(
+    'SELECT correct_answer FROM assessment_items WHERE id = $1',
+    [itemId]
+  );
+  return key.rows[0].correct_answer;
+}
+
 /**
  * Sits a real quiz: opens an attempt, answers through the grading endpoint and
  * submits. Tests used to post a score directly, which is exactly the hole the
@@ -71,34 +108,24 @@ export async function takeQuiz(
   /** Client-reported pace, which is what the focus signals read. */
   responseTimeMs?: number
 ): Promise<any> {
-  const { POST: buildQuiz } = await import('../../api/tutor/quiz.js');
   const { POST: answerQuiz } = await import('../../api/tutor/quiz/answer.js');
   const { POST: submitQuiz } = await import('../../api/tutor/quiz/submit.js');
 
-  const call = (handler: (r: Request) => Promise<Response>, body: unknown) =>
-    handler(new Request('https://test.local/api', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    }));
-
-  const quiz = await (await call(buildQuiz, { subject, conceptId })).json() as {
-    attemptId: number;
-    questions: { itemId: number }[];
-  };
+  const quiz = await openQuiz(token, subject, conceptId);
 
   for (const [index, question] of quiz.questions.entries()) {
-    const key = await executeSql<{ correct_answer: string }>(
-      'SELECT correct_answer FROM assessment_items WHERE id = $1',
-      [question.itemId]
-    );
-    const right = key.rows[0].correct_answer;
+    const right = await answerKey(question.itemId);
     const chosen = index < correctAnswers
       ? right
       : ['A', 'B', 'C', 'D'].find(letter => letter !== right)!;
 
-    await call(answerQuiz, { attemptId: quiz.attemptId, itemId: question.itemId, chosen, responseTimeMs });
+    await callAs(token, answerQuiz, {
+      attemptId: quiz.attemptId,
+      itemId: question.itemId,
+      chosen,
+      responseTimeMs,
+    });
   }
 
-  return (await call(submitQuiz, { attemptId: quiz.attemptId })).json();
+  return (await callAs(token, submitQuiz, { attemptId: quiz.attemptId })).json();
 }

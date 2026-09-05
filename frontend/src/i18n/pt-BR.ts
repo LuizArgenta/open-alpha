@@ -103,6 +103,9 @@ export const ptBR = {
   'quiz.whatToDoNext': 'O que fazer agora',
   'quiz.reviewConcept': 'Revisar {concept}',
   'quiz.reviewEarlier': 'Revisar o conceito anterior',
+  'quiz.expiredTitle': 'Esta prova expirou',
+  'quiz.expiredBody': 'Você começou faz um tempo, então ela foi encerrada. Comece outra — o que você já respondeu ficou guardado, mas não conta para o domínio.',
+  'quiz.expiredRestart': 'Começar uma prova nova',
   'quiz.backToLearning': 'Voltar a estudar',
   'quiz.continueLearning': 'Continuar estudando',
 
