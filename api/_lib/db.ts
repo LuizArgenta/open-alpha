@@ -33,6 +33,45 @@ export async function executeSql<T = Record<string, unknown>>(
   };
 }
 
+/**
+ * generated_lessons was unique on (subject_id, concept_id), which allows only
+ * one language per concept — a Portuguese reader would be served the cached
+ * English lesson forever. SQLite cannot drop a table-level constraint, so the
+ * table is rebuilt. Rows that predate the column are English: that is what the
+ * prompt produced before it took a language.
+ */
+async function migrateGeneratedLessonsToPerLanguage(): Promise<void> {
+  const columns = await client.execute('PRAGMA table_info(generated_lessons)');
+  const alreadyMigrated = columns.rows.some(row => row.name === 'language');
+  if (alreadyMigrated) return;
+
+  await client.executeMultiple(`
+    CREATE TABLE generated_lessons_per_language (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject_id TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'en',
+      content TEXT NOT NULL,
+      generation_model TEXT,
+      generation_prompt_version INTEGER DEFAULT 1,
+      feedback_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(subject_id, concept_id, language)
+    );
+
+    INSERT INTO generated_lessons_per_language
+      (subject_id, concept_id, language, content, generation_model,
+       generation_prompt_version, feedback_count, created_at, updated_at)
+    SELECT subject_id, concept_id, 'en', content, generation_model,
+           generation_prompt_version, feedback_count, created_at, updated_at
+    FROM generated_lessons;
+
+    DROP TABLE generated_lessons;
+    ALTER TABLE generated_lessons_per_language RENAME TO generated_lessons;
+  `);
+}
+
 export async function initializeSchema(): Promise<void> {
   await client.executeMultiple(`
     -- Users (students and parents)
@@ -131,18 +170,19 @@ export async function initializeSchema(): Promise<void> {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- On-demand generated lessons (cached LLM output)
+    -- On-demand generated lessons (cached LLM output), one row per language
     CREATE TABLE IF NOT EXISTS generated_lessons (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       subject_id TEXT NOT NULL,
       concept_id TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'en',
       content TEXT NOT NULL,
       generation_model TEXT,
       generation_prompt_version INTEGER DEFAULT 1,
       feedback_count INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(subject_id, concept_id)
+      UNIQUE(subject_id, concept_id, language)
     );
 
     -- Student interest profiles (for personalized lesson generation)
@@ -284,6 +324,10 @@ export async function initializeSchema(): Promise<void> {
       // Column already exists — safe to ignore
     }
   }
+
+  // Multi-step and not idempotent by accident, so it guards itself rather than
+  // relying on the swallowed errors above.
+  await migrateGeneratedLessonsToPerLanguage();
 }
 
 export default { executeSql, initializeSchema };

@@ -20,12 +20,32 @@ function getClient(): OpenAI {
   return client;
 }
 
+/** Languages the product ships in. Content is generated per language. */
+export type ContentLanguage = 'pt-BR' | 'en';
+
+export const DEFAULT_CONTENT_LANGUAGE: ContentLanguage = 'pt-BR';
+
+const LANGUAGE_NAMES: Record<ContentLanguage, string> = {
+  'pt-BR': 'Brazilian Portuguese',
+  en: 'English',
+};
+
+/**
+ * Instruction appended to every prompt. Stated as a hard rule because the
+ * curriculum metadata it reasons over is written in English, and without this
+ * the model answers in the language of its context rather than the reader's.
+ */
+export function languageInstruction(language: ContentLanguage): string {
+  return `Write everything you produce in ${LANGUAGE_NAMES[language]}. This applies even though the concept metadata below is in English: translate names and terminology naturally rather than leaving them untranslated. Keep proper nouns, mathematical notation and code identifiers unchanged.`;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
 export interface TutorContext {
+  language?: ContentLanguage;
   gradeLevel: number;
   subject: string;
   conceptName: string;
@@ -44,6 +64,7 @@ export interface TutorContext {
 export interface CoachContext {
   childGradeLevel: number;
   childProgressSummary: string;
+  language?: ContentLanguage;
 }
 
 function getTutorSystemPrompt(context: TutorContext): string {
@@ -94,6 +115,7 @@ ${languageGuideline}
 - If the student is struggling, break concepts into smaller steps
 - Keep responses concise and engaging
 - Ask questions to check understanding
+- ${languageInstruction(context.language ?? DEFAULT_CONTENT_LANGUAGE)}
 - Be patient and supportive${hasStoredContent ? `
 - Use the provided explanation and examples as your source of truth for this concept
 - Do not introduce definitions or examples that contradict the stored content` : `
@@ -221,6 +243,7 @@ interface LessonGenerationContext {
   interests?: Array<{ category: string; value: string }>;
   // Problems found in a previous attempt, fed back so the retry can fix them
   correctionFeedback?: string;
+  language?: ContentLanguage;
 }
 
 function getLessonGenerationPrompt(ctx: LessonGenerationContext): string {
@@ -264,6 +287,7 @@ Required JSON schema:
 }
 
 Rules:
+- ${languageInstruction(ctx.language ?? DEFAULT_CONTENT_LANGUAGE)}
 - Every worked example must have at least 2 steps that explain REASONING, not just arithmetic.
 - All content must be factually accurate.
 - Return ONLY the JSON object. No wrapping, no code fences.${
@@ -297,13 +321,51 @@ export async function generateLesson(
   return parsed;
 }
 
+/**
+ * Renders an authored lesson in another language. Translating what a human
+ * wrote beats generating a fresh lesson from the concept metadata: the
+ * pedagogy, examples and ordering were chosen deliberately, and only the
+ * words need to change.
+ */
+export async function translateLesson(
+  lesson: GeneratedLessonContent,
+  language: ContentLanguage,
+  model: string = 'claude-sonnet-4-6'
+): Promise<GeneratedLessonContent> {
+  const openai = getClient();
+
+  const prompt = `Translate the lesson below into ${language === 'pt-BR' ? 'Brazilian Portuguese' : 'English'}.
+
+Rules:
+- Return ONLY the translated JSON object, with exactly the same keys and structure. No commentary, no code fences.
+- Translate the teaching prose, including worked example steps and answers where they are prose.
+- Keep mathematical notation, numbers, formulas and code identifiers unchanged.
+- Keep the meaning and the pedagogical order. Do not add, remove or reorder examples.
+- Use natural classroom language for the target audience, not a literal word-for-word rendering.
+
+Lesson JSON:
+${JSON.stringify(lesson)}`;
+
+  const response = await openai.chat.completions.create({
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 8192,
+    temperature: 0.2,
+  });
+
+  const raw = response.choices[0]?.message?.content || '';
+  const cleaned = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
+  return JSON.parse(cleaned) as GeneratedLessonContent;
+}
+
 export async function generateQuizQuestions(
   subject: string,
   conceptName: string,
   gradeLevel: number,
   count: number = 5,
   interests?: Array<{ category: string; value: string }>,
-  recentAccuracy?: number
+  recentAccuracy?: number,
+  language: ContentLanguage = DEFAULT_CONTENT_LANGUAGE
 ): Promise<string> {
   const openai = getClient();
 
@@ -337,7 +399,9 @@ Format each question as JSON:
   ]
 }
 
-Make questions age-appropriate and progressively challenging.`;
+Make questions age-appropriate and progressively challenging.
+
+${languageInstruction(language)}`;
 
   const response = await openai.chat.completions.create({
     model: 'claude-sonnet-4-6',

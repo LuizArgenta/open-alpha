@@ -1,6 +1,6 @@
 import { executeSql } from '../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
-import { chatWithTutor, ChatMessage, TutorContext } from '../_lib/llm.js';
+import { chatWithTutor, ChatMessage, TutorContext , DEFAULT_CONTENT_LANGUAGE, type ContentLanguage } from '../_lib/llm.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
 
 interface User {
@@ -31,8 +31,9 @@ export async function POST(request: Request) {
       conceptId: string;
       sessionId?: number;
       explanationLevel?: 'eli5' | 'standard' | 'expert';
+      language?: ContentLanguage;
     };
-    const { message, subject, conceptId, sessionId, explanationLevel } = body;
+    const { message, subject, conceptId, sessionId, explanationLevel, language } = body;
 
     if (!message || !subject || !conceptId) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     const gradeLevel = userResult.rows[0].grade_level;
-    const concept = await getConceptWithLesson(subject, conceptId);
+    const concept = await getConceptWithLesson(subject, conceptId, language ?? DEFAULT_CONTENT_LANGUAGE);
 
     if (!concept) {
       return Response.json({ error: 'Concept not found' }, { status: 400 });
@@ -112,6 +113,7 @@ export async function POST(request: Request) {
       workedExamplesText,
       whyItMatters: concept.whyItMatters,
       explanationLevelOverride: explanationLevel,
+      language: language ?? DEFAULT_CONTENT_LANGUAGE,
       interests: interests.length > 0 ? interests : undefined,
     };
 
