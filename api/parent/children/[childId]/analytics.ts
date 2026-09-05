@@ -1,6 +1,7 @@
 import { executeSql } from '../../../_lib/db.js';
 import { getAuthFromRequest, unauthorized, forbidden } from '../../../_lib/auth.js';
 import { subjects } from '../../../_lib/curriculum.js';
+import { type AlertProgressRow, buildAlerts } from '../../../_lib/alerts.js';
 
 export async function GET(request: Request) {
   try {
@@ -54,8 +55,11 @@ export async function GET(request: Request) {
       subject: string;
       concept_id: string;
       mastery_score: number;
+      attempts: number;
+      next_review_at: string | null;
+      review_interval_days: number | null;
     }>(
-      'SELECT subject, concept_id, mastery_score FROM progress WHERE student_id = $1',
+      'SELECT subject, concept_id, mastery_score, attempts, next_review_at, review_interval_days FROM progress WHERE student_id = $1',
       [childId]
     );
 
@@ -101,8 +105,26 @@ export async function GET(request: Request) {
       [childId]
     );
 
+    const lastActive = lastActiveResult.rows[0]?.updated_at || null;
+
+    const alertRows: AlertProgressRow[] = progressResult.rows.map(row => {
+      const subject = subjects.find(s => s.id === row.subject);
+      const concept = subject?.concepts.find(c => c.id === row.concept_id);
+      return {
+        subject: row.subject,
+        subjectName: subject?.name || row.subject,
+        conceptId: row.concept_id,
+        conceptName: concept?.name || row.concept_id,
+        masteryScore: row.mastery_score,
+        attempts: row.attempts,
+        nextReviewAt: row.next_review_at,
+        reviewIntervalDays: row.review_interval_days,
+      };
+    });
+
     return Response.json({
-      lastActive: lastActiveResult.rows[0]?.updated_at || null,
+      lastActive,
+      alerts: buildAlerts(alertRows, lastActive),
       recentActivity: activityResult.rows,
       struggling: strugglingResult.rows.map(s => {
         const subject = subjects.find(sub => sub.id === s.subject);

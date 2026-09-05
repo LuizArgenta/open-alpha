@@ -44,12 +44,29 @@ interface Recommendation {
   reason: string;
 }
 
+interface StudentAlert {
+  code: 'stuck' | 'retention_drop' | 'reviews_overdue' | 'inactive';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  detail: string;
+  subject?: string;
+  conceptId?: string;
+  conceptName?: string;
+}
+
 interface Analytics {
   lastActive: string | null;
+  alerts: StudentAlert[];
   recentActivity: Activity[];
   struggling: Struggling[];
   recommendations: Recommendation[];
 }
+
+const SEVERITY_COLOR: Record<StudentAlert['severity'], string> = {
+  high: 'var(--error)',
+  medium: '#f59e0b',
+  low: 'var(--text-light)',
+};
 
 export default function ParentDashboard() {
   const { token } = useAuth();
@@ -298,6 +315,29 @@ export default function ParentDashboard() {
 
             {selectedChild ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {/* What needs a decision, before the percentages */}
+                {analytics?.alerts && analytics.alerts.length > 0 && (
+                  <div className="card">
+                    <h4 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Needs Attention</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {analytics.alerts.map((alert, index) => (
+                        <div
+                          key={`${alert.code}-${alert.conceptId ?? index}`}
+                          style={{
+                            borderLeft: `3px solid ${SEVERITY_COLOR[alert.severity]}`,
+                            paddingLeft: '0.75rem',
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{alert.title}</div>
+                          <div style={{ fontSize: '0.8125rem', color: 'var(--text-light)', lineHeight: 1.5 }}>
+                            {alert.detail}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Struggling Alerts */}
                 {analytics?.struggling && analytics.struggling.length > 0 && (
                   <div className="card" style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid var(--error)' }}>
