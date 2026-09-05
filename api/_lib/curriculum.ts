@@ -1,6 +1,8 @@
+import { createHash } from 'crypto';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { executeSql } from './db.js';
+import { type SqlStatement, executeSql, executeTransaction } from './db.js';
+import { type RecordProblem, parseConceptRecord } from './curriculum-record.js';
 
 // ── Enriched content types ────────────────────────────────────────────────────
 
@@ -170,12 +172,26 @@ interface SubjectRow {
   description: string | null;
 }
 
-/** Published curriculum from the database. Empty when nothing is seeded yet. */
-export async function loadSubjectsFromDatabase(): Promise<Subject[]> {
+export interface DatabaseCurriculum {
+  subjects: Subject[];
+  /** Records that were stored but could not be trusted, and why. */
+  problems: RecordProblem[];
+}
+
+/**
+ * Published curriculum from the database, with the unusable records left out
+ * rather than allowed to take the read down.
+ *
+ * `content` and `prerequisites` are JSON blobs and JSON.parse throws, so one
+ * corrupted row used to fail the whole query — and the caller, seeing a failed
+ * read, swapped the entire curriculum for the fallback files. One damaged
+ * concept now costs one concept, and says so.
+ */
+export async function readCurriculumFromDatabase(): Promise<DatabaseCurriculum> {
   const subjectRows = await executeSql<SubjectRow>(
     `SELECT id, name, description FROM curriculum_subjects WHERE status = 'published' ORDER BY id`
   );
-  if (subjectRows.rows.length === 0) return [];
+  if (subjectRows.rows.length === 0) return { subjects: [], problems: [] };
 
   const conceptRows = await executeSql<ConceptRow>(
     `SELECT subject_id, concept_id, name, description, level, prerequisites, content
@@ -184,74 +200,176 @@ export async function loadSubjectsFromDatabase(): Promise<Subject[]> {
   );
 
   const bySubject = new Map<string, Concept[]>();
+  const problems: RecordProblem[] = [];
+
   for (const row of conceptRows.rows) {
+    const parsed = parseConceptRecord(row);
+    if ('problem' in parsed) {
+      problems.push(parsed.problem);
+      continue;
+    }
+
     const concept: Concept = {
       id: row.concept_id,
       name: row.name,
       description: row.description ?? '',
-      prerequisites: JSON.parse(row.prerequisites || '[]'),
+      prerequisites: parsed.record.prerequisites,
       gradeLevel: row.level,
-      ...(JSON.parse(row.content || '{}') as Partial<Concept>),
+      ...(parsed.record.content as Partial<Concept>),
     };
     bySubject.set(row.subject_id, [...(bySubject.get(row.subject_id) ?? []), concept]);
   }
 
-  return subjectRows.rows.map(row => ({
-    id: row.id,
-    name: row.name,
-    description: row.description ?? '',
-    concepts: bySubject.get(row.id) ?? [],
-  }));
+  return {
+    subjects: subjectRows.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      description: row.description ?? '',
+      concepts: bySubject.get(row.id) ?? [],
+    })),
+    problems,
+  };
+}
+
+/** The graph alone, for callers that only want to compare it to the files. */
+export async function loadSubjectsFromDatabase(): Promise<Subject[]> {
+  return (await readCurriculumFromDatabase()).subjects;
 }
 
 /**
- * Copies the JSON files into the database. Idempotent: re-running overwrites
- * what the files define and leaves anything authored elsewhere alone.
+ * The content hash of a concept as published.
+ *
+ * Re-running the import used to bump `version` on every concept every time,
+ * because the write was unconditional. Version then measured how many times
+ * the import had run, not how many times the concept had changed — which is
+ * the one thing a version is for when a teacher asks "what did the students
+ * see last term?".
  */
-export async function importCurriculumFromFiles(): Promise<{ subjects: number; concepts: number }> {
+export function conceptContentHash(concept: {
+  name: string;
+  description: string;
+  gradeLevel: number;
+  prerequisites: string[];
+  content: Record<string, unknown>;
+}): string {
+  // Key order is the author's, not meaningful, so it must not change the hash.
+  const canonical = JSON.stringify(
+    {
+      name: concept.name,
+      description: concept.description,
+      level: concept.gradeLevel,
+      prerequisites: [...concept.prerequisites].sort(),
+      content: concept.content,
+    },
+    (_key, value) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+        : value
+  );
+
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+export interface ImportResult {
+  subjects: number;
+  /** Concepts written: created plus genuinely changed. */
+  concepts: number;
+  created: number;
+  updated: number;
+  /** Concepts already stored with identical content, left untouched. */
+  unchanged: number;
+}
+
+/**
+ * Copies the JSON files into the database, as one transaction.
+ *
+ * It used to write concept by concept: an import interrupted halfway left the
+ * curriculum half-old and half-new, with no way to tell which half a student
+ * had been served. Nothing here needs the database's answer mid-way, so the
+ * whole thing is prepared and then applied at once.
+ *
+ * Idempotent in the strong sense now: a concept whose content hash already
+ * matches is not written at all, so re-running does not touch `version` or
+ * `updated_at`.
+ */
+export async function importCurriculumFromFiles(): Promise<ImportResult> {
   const fromFiles = loadSubjectsFromFiles();
-  let conceptCount = 0;
+
+  const stored = await executeSql<{ subject_id: string; concept_id: string; content_hash: string | null }>(
+    'SELECT subject_id, concept_id, content_hash FROM curriculum_concepts'
+  );
+  const hashes = new Map(
+    stored.rows.map(row => [`${row.subject_id}/${row.concept_id}`, row.content_hash])
+  );
+
+  const writes: SqlStatement[] = [];
+  let created = 0;
+  let updated = 0;
+  let unchanged = 0;
 
   for (const subject of fromFiles) {
-    await executeSql(
-      `INSERT INTO curriculum_subjects (id, name, description, status)
+    writes.push({
+      sql: `INSERT INTO curriculum_subjects (id, name, description, status)
        VALUES ($1, $2, $3, 'published')
        ON CONFLICT(id) DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
          updated_at = datetime('now')`,
-      [subject.id, subject.name, subject.description]
-    );
+      params: [subject.id, subject.name, subject.description],
+    });
 
     for (const concept of subject.concepts) {
       const { id, name, description, prerequisites, gradeLevel, ...enriched } = concept;
-      await executeSql(
-        `INSERT INTO curriculum_concepts
-           (subject_id, concept_id, name, description, level, prerequisites, content, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'published')
+      const content = pickEnriched(enriched as Record<string, unknown>);
+      const hash = conceptContentHash({ name, description, gradeLevel, prerequisites, content });
+
+      const key = `${subject.id}/${id}`;
+      if (hashes.has(key)) {
+        if (hashes.get(key) === hash) {
+          unchanged++;
+          continue;
+        }
+        updated++;
+      } else {
+        created++;
+      }
+
+      writes.push({
+        sql: `INSERT INTO curriculum_concepts
+           (subject_id, concept_id, name, description, level, prerequisites, content, content_hash, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published')
          ON CONFLICT(subject_id, concept_id) DO UPDATE SET
            name = EXCLUDED.name,
            description = EXCLUDED.description,
            level = EXCLUDED.level,
            prerequisites = EXCLUDED.prerequisites,
            content = EXCLUDED.content,
+           content_hash = EXCLUDED.content_hash,
            version = curriculum_concepts.version + 1,
            updated_at = datetime('now')`,
-        [
+        params: [
           subject.id,
           id,
           name,
           description,
           gradeLevel,
           JSON.stringify(prerequisites),
-          JSON.stringify(pickEnriched(enriched as Record<string, unknown>)),
-        ]
-      );
-      conceptCount++;
+          JSON.stringify(content),
+          hash,
+        ],
+      });
     }
   }
 
-  return { subjects: fromFiles.length, concepts: conceptCount };
+  await executeTransaction(writes);
+
+  return {
+    subjects: fromFiles.length,
+    concepts: created + updated,
+    created,
+    updated,
+    unchanged,
+  };
 }
 
 /**
@@ -284,6 +402,12 @@ export interface CurriculumStatus {
   loadedAt: string;
   subjects: number;
   concepts: number;
+  /**
+   * Records that were stored but unusable, and so are missing from the graph.
+   * Not degraded — the rest of the curriculum is the one that was published —
+   * but a student whose progress points at one of these has nowhere to go.
+   */
+  invalidRecords: RecordProblem[];
 }
 
 function countConcepts(loaded: Subject[]): number {
@@ -338,27 +462,38 @@ export async function resolveCurriculum(): Promise<{ loaded: Subject[]; status: 
         loadedAt: at,
         subjects: loaded.length,
         concepts: countConcepts(loaded),
+        invalidRecords: [],
       },
     };
   };
 
-  let fromDatabase: Subject[];
+  let fromDatabase: DatabaseCurriculum;
   try {
-    fromDatabase = await loadSubjectsFromDatabase();
+    fromDatabase = await readCurriculumFromDatabase();
   } catch (error) {
     return degrade('database_error', error);
   }
 
-  if (fromDatabase.length === 0) return degrade('database_empty');
+  if (fromDatabase.subjects.length === 0) return degrade('database_empty');
+
+  if (fromDatabase.problems.length > 0) {
+    // Loud for the same reason as the degraded line: nothing else about a
+    // dropped concept is visible from the outside.
+    console.error(
+      `[CURRICULUM_INVALID_RECORDS] ${fromDatabase.problems.length} stored concepts were skipped`,
+      fromDatabase.problems
+    );
+  }
 
   return {
-    loaded: fromDatabase,
+    loaded: fromDatabase.subjects,
     status: {
       origin: 'database',
       degraded: false,
       loadedAt: at,
-      subjects: fromDatabase.length,
-      concepts: countConcepts(fromDatabase),
+      subjects: fromDatabase.subjects.length,
+      concepts: countConcepts(fromDatabase.subjects),
+      invalidRecords: fromDatabase.problems,
     },
   };
 }

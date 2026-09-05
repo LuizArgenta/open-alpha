@@ -83,6 +83,8 @@ export const en: Dictionary = {
   'learn.advanceBanner': 'Nice work! Moving on to {concept}...',
 
   // ── Quiz ──────────────────────────────────────────────────────────────────
+  'curriculumHealth.invalidTitle': '{count} concepts were left out of the curriculum',
+  'curriculumHealth.invalidBody': 'They are stored but could not be read as valid content, so students cannot reach them. A student whose progress points at one has nowhere to go.',
   'curriculumHealth.title': 'Students are not being taught from this curriculum',
   'curriculumHealth.databaseEmpty': 'The curriculum database has nothing published, so the app is serving the seed files. Run the import so what you edit here is what students see.',
   'curriculumHealth.databaseError': 'The curriculum database could not be read, so the app is serving the seed files. Anything authored here is invisible to students until it recovers.',

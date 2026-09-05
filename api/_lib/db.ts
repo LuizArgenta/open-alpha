@@ -291,6 +291,9 @@ export async function initializeSchema(): Promise<void> {
       -- The enriched bundle (explanation, examples, mastery check...) kept as
       -- authored. It is nested and it is always read whole.
       content TEXT NOT NULL DEFAULT '{}',
+      -- Hash of the published content, so an import that changes nothing does
+      -- not bump the version a teacher reads as "this concept changed".
+      content_hash TEXT,
       status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'in_review', 'published')),
       version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
@@ -400,6 +403,8 @@ export async function initializeSchema(): Promise<void> {
   const migrations = [
     'ALTER TABLE users ADD COLUMN atxp_account_id TEXT',
     'ALTER TABLE users ADD COLUMN atxp_connection_token TEXT',
+    // Content hash of a published concept, to keep version meaningful
+    'ALTER TABLE curriculum_concepts ADD COLUMN content_hash TEXT',
     // Attempts that timed out instead of being submitted
     'ALTER TABLE assessment_attempts ADD COLUMN expired_at TEXT',
     // Spaced review scheduling
