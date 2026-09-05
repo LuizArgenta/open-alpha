@@ -7,10 +7,51 @@ import {
   toProgressMap,
 } from '../../_lib/curriculum.js';
 import { scheduleAfterLapse, scheduleAfterMastery } from '../../_lib/review.js';
+import { type AnswerEvent, diagnoseAttempt } from '../../_lib/diagnosis.js';
 
 interface Progress {
   mastery_score: number;
   review_interval_days: number | null;
+  attempts: number;
+}
+
+interface EventRow {
+  event_type: string;
+  payload: string;
+  created_at: string;
+}
+
+/**
+ * The answers from the quiz that was just submitted: everything logged since
+ * the most recent quiz_start for this concept.
+ */
+async function loadAttemptAnswers(
+  studentId: number,
+  subject: string,
+  conceptId: string
+): Promise<AnswerEvent[]> {
+  const events = await executeSql<EventRow>(
+    `SELECT event_type, payload, created_at FROM learning_events
+     WHERE student_id = $1 AND subject = $2 AND concept_id = $3
+     ORDER BY created_at DESC, id DESC
+     LIMIT 60`,
+    [studentId, subject, conceptId]
+  );
+
+  const answers: AnswerEvent[] = [];
+  for (const event of events.rows) {
+    if (event.event_type === 'quiz_start') break;
+    if (event.event_type !== 'quiz_answer') continue;
+
+    const payload = JSON.parse(event.payload || '{}');
+    answers.push({
+      correct: payload.correct === true,
+      responseTimeMs: payload.responseTimeMs,
+      at: event.created_at,
+    });
+  }
+
+  return answers.reverse();
 }
 
 interface SubjectProgressRow {
@@ -57,9 +98,11 @@ export async function POST(request: Request) {
     }
 
     const existingProgress = await executeSql<Progress>(
-      'SELECT mastery_score, review_interval_days FROM progress WHERE student_id = $1 AND subject = $2 AND concept_id = $3',
+      'SELECT mastery_score, review_interval_days, attempts FROM progress WHERE student_id = $1 AND subject = $2 AND concept_id = $3',
       [auth.userId, subject, conceptId]
     );
+
+    const priorAttempts = existingProgress.rows[0]?.attempts ?? 0;
 
     // This attempt, not the all-time best: mastery_score never regresses, so it
     // is the raw score that tells us whether the concept held up today.
@@ -99,11 +142,30 @@ export async function POST(request: Request) {
 
     const passed = newScore >= MASTERY_THRESHOLD;
 
+    if (passed) {
+      return Response.json({
+        masteryScore: newScore,
+        passed,
+        message: "Congratulations! You've mastered this concept!",
+      });
+    }
+
+    // Why they failed decides what to offer: a student who rushed or walked
+    // away hasn't shown a knowledge gap, so sending them to a prerequisite
+    // would be answering the wrong question.
+    const diagnosis = diagnoseAttempt({
+      answers: await loadAttemptAnswers(auth.userId, subject, conceptId),
+      priorAttempts,
+    });
+
     return Response.json({
       masteryScore: newScore,
       passed,
-      message: passed ? "Congratulations! You've mastered this concept!" : 'Keep practicing to reach 80% mastery.',
-      remediation: passed ? undefined : await buildRemediation(auth.userId, subject, conceptId),
+      message: 'Keep practicing to reach 80% mastery.',
+      diagnosis: diagnosis.pattern,
+      remediation: diagnosis.isAttention
+        ? { action: 'extra_practice', message: diagnosis.message }
+        : await buildRemediation(auth.userId, subject, conceptId),
     });
   } catch (error) {
     console.error('Submit quiz error:', error);
