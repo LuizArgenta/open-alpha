@@ -1,6 +1,12 @@
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-change-in-production';
+// No fallback on purpose: a default secret in production lets anyone mint a valid
+// token for any user, including another family's child account.
+const configuredSecret = process.env.JWT_SECRET;
+if (!configuredSecret) {
+  throw new Error('JWT_SECRET is not set. Set it in the environment before serving requests.');
+}
+const JWT_SECRET: string = configuredSecret;
 
 export interface AuthPayload {
   userId: number;
