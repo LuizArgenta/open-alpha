@@ -8,6 +8,8 @@ interface User {
 
 interface Progress {
   concept_id: string;
+  mastery_score: number;
+  attempts: number;
 }
 
 export async function GET(request: Request) {
@@ -29,13 +31,19 @@ export async function GET(request: Request) {
       return Response.json({ error: 'Grade level not set' }, { status: 400 });
     }
 
+    // Every row, not just mastered ones: attempts and score on failed concepts
+    // are what let the engine step back to a prerequisite instead of looping.
     const progressResult = await executeSql<Progress>(
-      'SELECT concept_id FROM progress WHERE student_id = $1 AND subject = $2 AND mastery_score >= 80',
+      'SELECT concept_id, mastery_score, attempts FROM progress WHERE student_id = $1 AND subject = $2',
       [auth.userId, subject]
     );
 
-    const completedIds = progressResult.rows.map(p => p.concept_id);
-    const nextConcept = getNextConcept(subject, completedIds, userResult.rows[0].grade_level);
+    const progress = progressResult.rows.map(row => ({
+      conceptId: row.concept_id,
+      masteryScore: row.mastery_score,
+      attempts: row.attempts,
+    }));
+    const nextConcept = getNextConcept(subject, progress, userResult.rows[0].grade_level);
 
     return Response.json({ concept: nextConcept || null });
   } catch (error) {

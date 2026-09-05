@@ -238,6 +238,18 @@ export default function Learn() {
     }
   };
 
+  // Send the student to the concept the engine identified as the real gap.
+  // The selectedConcept effect closes the quiz and opens the lesson for it.
+  const handleRemediate = (targetConceptId: string) => {
+    const target = concepts.find((c) => c.id === targetConceptId);
+    if (!target) {
+      setShowQuiz(false);
+      return;
+    }
+    setSelectedConcept(target);
+    navigate(`/learn/${subject}/${target.id}`);
+  };
+
   // Only show the full-page spinner on the very first load (no concepts yet).
   // After concepts are loaded, switching concepts must NOT re-trigger this
   // spinner — it would hide the "Writing your lesson..." generating screen.
@@ -477,6 +489,7 @@ export default function Learn() {
                 onComplete={handleQuizComplete}
                 onCancel={() => setShowQuiz(false)}
                 onReviewLesson={() => { setShowQuiz(false); setShowIntro(true); }}
+                onRemediate={handleRemediate}
               />
             ) : (
               <>

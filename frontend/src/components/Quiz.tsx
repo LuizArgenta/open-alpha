@@ -9,6 +9,13 @@ interface Question {
   explanation: string;
 }
 
+interface Remediation {
+  action: 'review_prerequisites' | 'simpler_explanation' | 'sub_skill' | 'extra_practice';
+  message: string;
+  conceptId?: string;
+  conceptName?: string;
+}
+
 interface QuizProps {
   subject: string;
   conceptId: string;
@@ -16,9 +23,10 @@ interface QuizProps {
   onComplete: (score: number, passed: boolean) => void;
   onCancel: () => void;
   onReviewLesson?: () => void;
+  onRemediate?: (conceptId: string) => void;
 }
 
-export default function Quiz({ subject, conceptId, conceptName, onComplete, onCancel, onReviewLesson }: QuizProps) {
+export default function Quiz({ subject, conceptId, conceptName, onComplete, onCancel, onReviewLesson, onRemediate }: QuizProps) {
   const { token } = useAuth();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -28,6 +36,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [finished, setFinished] = useState(false);
+  const [remediation, setRemediation] = useState<Remediation | null>(null);
 
   useEffect(() => {
     fetchQuiz();
@@ -76,7 +85,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
 
   async function submitResults(score: number) {
     try {
-      await fetch('/api/tutor/quiz/submit', {
+      const res = await fetch('/api/tutor/quiz/submit', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -90,6 +99,9 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
           correctAnswers: correctCount,
         }),
       });
+
+      const data = await res.json();
+      if (data.remediation) setRemediation(data.remediation);
     } catch (error) {
       console.error('Failed to submit results:', error);
     }
@@ -208,13 +220,41 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
             <p style={{ color: 'var(--success)', marginBottom: '1.5rem' }}>
               You've mastered {conceptName}!
             </p>
+          ) : remediation ? (
+            <div style={{
+              marginBottom: '1.5rem',
+              padding: '0.875rem 1rem',
+              borderRadius: '0.5rem',
+              background: 'rgba(99, 102, 241, 0.08)',
+              border: '1px solid var(--primary)',
+              textAlign: 'left',
+            }}>
+              <p style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.375rem' }}>
+                Here's what to do next
+              </p>
+              <p style={{ fontSize: '0.875rem', lineHeight: 1.5 }}>{remediation.message}</p>
+            </div>
           ) : (
             <p style={{ color: 'var(--text-light)', marginBottom: '1.5rem' }}>
               You need 80% to master this concept. Keep learning and try again!
             </p>
           )}
 
-          <button onClick={() => onComplete(score, passed)} className="btn btn-primary" style={{ width: '100%' }}>
+          {!passed && remediation?.conceptId && onRemediate && (
+            <button
+              onClick={() => onRemediate(remediation.conceptId!)}
+              className="btn btn-primary"
+              style={{ width: '100%', marginBottom: '0.75rem' }}
+            >
+              Review {remediation.conceptName ?? 'the earlier concept'}
+            </button>
+          )}
+
+          <button
+            onClick={() => onComplete(score, passed)}
+            className={!passed && remediation?.conceptId && onRemediate ? 'btn btn-outline' : 'btn btn-primary'}
+            style={{ width: '100%' }}
+          >
             {passed ? 'Continue Learning' : 'Back to Learning'}
           </button>
         </div>
