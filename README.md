@@ -188,6 +188,10 @@ For production (Vercel):
   because teaching from a curriculum nobody published is worse than an
   outage. Either way, `GET /api/health/curriculum` answers 503 while the
   instance is degraded.
+- `CURRICULUM_REFRESH_SECONDS` - How often a running instance checks whether
+  the published curriculum has moved on (default 30). The check is one small
+  aggregate query and never blocks a request; publishing forces the instance
+  that served the publish to reload immediately.
 
 ### Contributing
 
