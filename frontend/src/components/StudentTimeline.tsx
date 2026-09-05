@@ -6,6 +6,7 @@ interface AttemptEvent {
   type: 'attempt';
   at: string;
   subject: string;
+  kind: 'mastery' | 'placement';
   conceptId: string;
   conceptName: string;
   score: number | null;
@@ -88,11 +89,14 @@ export default function StudentTimeline({ childId }: { childId: number }) {
             >
               <div style={{ fontSize: '0.875rem' }}>
                 {event.type === 'attempt'
-                  ? `${t('timeline.attempt', {
-                      concept: event.conceptName,
-                      correct: event.correct,
-                      answered: event.answered,
-                    })}${event.score !== null ? ` · ${t('timeline.attemptScore', { score: event.score })}` : ''}`
+                  ? `${t(
+                      event.kind === 'placement' ? 'timeline.placementAttempt' : 'timeline.attempt',
+                      {
+                        concept: event.conceptName,
+                        correct: event.correct,
+                        answered: event.answered,
+                      }
+                    )}${event.score !== null ? ` · ${t('timeline.attemptScore', { score: event.score })}` : ''}`
                   : serverText(
                       `timeline.decision.${event.kind}`,
                       { concept: event.conceptName ?? '', decision: event.decision },

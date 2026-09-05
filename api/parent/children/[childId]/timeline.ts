@@ -16,6 +16,7 @@ const MAX_LIMIT = 200;
 interface AttemptRow {
   id: number;
   subject: string;
+  kind: string;
   concept_id: string;
   score: number | null;
   finished_at: string | null;
@@ -39,6 +40,7 @@ type TimelineEvent =
       type: 'attempt';
       at: string;
       subject: string;
+      kind: 'mastery' | 'placement';
       conceptId: string;
       conceptName: string;
       score: number | null;
@@ -75,7 +77,7 @@ export async function GET(request: Request) {
     );
 
     const attempts = await executeSql<AttemptRow>(
-      `SELECT a.id, a.subject, a.concept_id, a.score, a.finished_at, a.started_at,
+      `SELECT a.id, a.subject, a.kind, a.concept_id, a.score, a.finished_at, a.started_at,
               COUNT(r.id) as answered,
               COALESCE(SUM(r.correct), 0) as correct
        FROM assessment_attempts a
@@ -101,6 +103,8 @@ export async function GET(request: Request) {
         type: 'attempt',
         at: row.finished_at ?? row.started_at,
         subject: row.subject,
+        // A placement spans the subject, so it has no concept to name.
+        kind: row.kind === 'placement' ? 'placement' : 'mastery',
         conceptId: row.concept_id,
         conceptName: conceptName(row.subject, row.concept_id) ?? row.concept_id,
         score: row.score,

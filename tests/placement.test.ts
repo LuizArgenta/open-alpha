@@ -11,12 +11,12 @@ import { GET as getProbe, POST as submitProbe } from '../api/tutor/placement/[su
 import {
   MAX_PROBED_CONCEPTS,
   PLACEMENT_CONFIDENCE,
-  buildProbe,
   chooseProbeConcepts,
   estimateFromProbe,
 } from '../api/_lib/placement.js';
+import { POST as answerItem } from '../api/tutor/quiz/answer.js';
 import { getConcept } from '../api/_lib/curriculum.js';
-import { createUser, resetDatabase } from './helpers/database.js';
+import { createUser, openQuiz, resetDatabase } from './helpers/database.js';
 
 const SUBJECT = 'math';
 const GRADE = 4;
@@ -97,9 +97,50 @@ describe('reading a probe', () => {
 });
 
 describe('the placement endpoint', () => {
+  interface OpenProbe {
+    available: boolean;
+    attemptId: number;
+    items: { itemId: number; conceptId: string; question: string; options: string[] }[];
+  }
+
+  async function openProbe(): Promise<OpenProbe> {
+    return (await getProbe(probeRequest('GET'))).json() as Promise<OpenProbe>;
+  }
+
+  /** The stored answer key, which only the server is supposed to know. */
+  async function keyFor(itemId: number): Promise<string> {
+    const row = await executeSql<{ correct_answer: string }>(
+      'SELECT correct_answer FROM assessment_items WHERE id = $1',
+      [itemId]
+    );
+    return row.rows[0].correct_answer;
+  }
+
+  /** Answers one item through the same grading endpoint the quiz uses. */
+  async function answer(attemptId: number, itemId: number, chosen: string, as = token) {
+    return answerItem(
+      new Request('https://test.local/api/tutor/quiz/answer', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${as}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ attemptId, itemId, chosen }),
+      })
+    );
+  }
+
+  /** Sits the whole probe, deciding per item whether to answer it correctly. */
+  async function sitProbe(rightWhen: (conceptId: string) => boolean = () => true) {
+    const probe = await openProbe();
+    for (const item of probe.items) {
+      const right = await keyFor(item.itemId);
+      await answer(probe.attemptId, item.itemId, rightWhen(item.conceptId) ? right : 'Z');
+    }
+    const response = await submitProbe(probeRequest('POST', { attemptId: probe.attemptId }));
+    return { probe, response, body: await response.json() as any };
+  }
+
   it('never sends the correct answers to the client', async () => {
     // A placement a student can see through measures nothing.
-    const body = await (await getProbe(probeRequest('GET'))).json() as any;
+    const body = await openProbe();
     const serialised = JSON.stringify(body);
 
     expect(body.items.length).toBeGreaterThan(0);
@@ -108,15 +149,9 @@ describe('the placement endpoint', () => {
   });
 
   it('places the student on the concepts they demonstrated', async () => {
-    const probe = buildProbe(chooseProbeConcepts(SUBJECT, GRADE));
-    const answers = probe.items.map(item => ({
-      conceptId: item.conceptId,
-      chosen: item.question.correctAnswer,
-    }));
+    const { body } = await sitProbe();
 
-    const result = await (await submitProbe(probeRequest('POST', { answers }))).json() as any;
-
-    expect(result.placed.length).toBeGreaterThan(0);
+    expect(body.placed.length).toBeGreaterThan(0);
 
     const rows = await executeSql<{ concept_id: string; mastery_source: string; mastery_confidence: number }>(
       'SELECT concept_id, mastery_source, mastery_confidence FROM progress WHERE student_id = $1',
@@ -127,37 +162,103 @@ describe('the placement endpoint', () => {
   });
 
   it('places nobody when every answer is wrong', async () => {
-    const probe = buildProbe(chooseProbeConcepts(SUBJECT, GRADE));
-    const answers = probe.items.map(item => ({ conceptId: item.conceptId, chosen: 'Z' }));
+    const { body } = await sitProbe(() => false);
 
-    const result = await (await submitProbe(probeRequest('POST', { answers }))).json() as any;
-
-    expect(result.placed).toEqual([]);
+    expect(body.placed).toEqual([]);
     const rows = await executeSql('SELECT id FROM progress WHERE student_id = $1', [studentId]);
     expect(rows.rows).toHaveLength(0);
   });
 
-  it('grades against the curriculum, not against what the client claims', async () => {
-    // A client that reports its own correctness could place itself anywhere.
-    const probe = buildProbe(chooseProbeConcepts(SUBJECT, GRADE));
-    const answers = probe.items.map(item => ({
-      conceptId: item.conceptId,
-      chosen: 'Z',
-      correct: true, // ignored on purpose
-    }));
+  it('counts an answer for the concept the server stored it under', async () => {
+    // The hole this closes: the concept an answer counted for used to come
+    // from the client, so a student could answer the easiest item, label it
+    // with the hardest concept, and be placed above the gap they still had.
+    const probe = await openProbe();
+    const easiest = probe.items[0].conceptId;
 
-    const result = await (await submitProbe(probeRequest('POST', { answers }))).json() as any;
-    expect(result.placed).toEqual([]);
+    const { body } = await sitProbe(conceptId => conceptId === easiest);
+
+    expect(body.placed).toEqual([easiest]);
+  });
+
+  it('treats an item the student skipped as wrong', async () => {
+    // Otherwise the way to be placed above a gap is to leave it unanswered.
+    const probe = await openProbe();
+    const target = probe.items[0].conceptId;
+    const forTarget = probe.items.filter(item => item.conceptId === target);
+    expect(forTarget.length).toBeGreaterThan(1);
+
+    await answer(probe.attemptId, forTarget[0].itemId, await keyFor(forTarget[0].itemId));
+
+    const body = await (await submitProbe(probeRequest('POST', { attemptId: probe.attemptId }))).json() as any;
+
+    expect(body.placed).not.toContain(target);
+  });
+
+  it('keeps the evidence of what was asked and answered', async () => {
+    const { probe } = await sitProbe();
+
+    const items = await executeSql<{ n: number }>(
+      'SELECT COUNT(*) as n FROM assessment_attempt_items WHERE attempt_id = $1',
+      [probe.attemptId]
+    );
+    const responses = await executeSql<{ n: number }>(
+      'SELECT COUNT(*) as n FROM assessment_responses WHERE attempt_id = $1',
+      [probe.attemptId]
+    );
+
+    expect(Number(items.rows[0].n)).toBe(probe.items.length);
+    expect(Number(responses.rows[0].n)).toBe(probe.items.length);
+  });
+
+  it('refuses to place a second time from the same probe', async () => {
+    const { probe } = await sitProbe();
+
+    const again = await submitProbe(probeRequest('POST', { attemptId: probe.attemptId }));
+
+    expect(again.status).toBe(409);
+  });
+
+  it("refuses another student's probe", async () => {
+    const probe = await openProbe();
+    const otherId = await createUser('student', GRADE);
+    const otherToken = signToken({ userId: otherId, role: 'student' });
+
+    const response = await submitProbe(
+      new Request(`https://test.local/api/tutor/placement/${SUBJECT}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${otherToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ attemptId: probe.attemptId }),
+      })
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it('refuses a mastery attempt submitted as a placement', async () => {
+    // Placing off one concept would write placement confidence over a whole
+    // subject from a single mastery check.
+    const quiz = await openQuiz(token, SUBJECT, 'math-fractions-intro');
+
+    const response = await submitProbe(probeRequest('POST', { attemptId: quiz.attemptId }));
+
+    expect(response.status).toBe(400);
+  });
+
+  it('refuses a probe that was opened hours ago', async () => {
+    const probe = await openProbe();
+    await executeSql(
+      `UPDATE assessment_attempts SET started_at = datetime('now', '-5 hours') WHERE id = $1`,
+      [probe.attemptId]
+    );
+
+    const response = await submitProbe(probeRequest('POST', { attemptId: probe.attemptId }));
+
+    expect(response.status).toBe(410);
   });
 
   it('records the placement as a decision, with what it was based on', async () => {
-    const probe = buildProbe(chooseProbeConcepts(SUBJECT, GRADE));
-    await submitProbe(probeRequest('POST', {
-      answers: probe.items.map(item => ({
-        conceptId: item.conceptId,
-        chosen: item.question.correctAnswer,
-      })),
-    }));
+    await sitProbe();
 
     const decision = await executeSql<{ reason: string; inputs: string }>(
       `SELECT reason, inputs FROM learning_decisions WHERE kind = 'placement'`
@@ -175,13 +276,7 @@ describe('the placement endpoint', () => {
       [studentId, SUBJECT, concept.id]
     );
 
-    const probe = buildProbe(chooseProbeConcepts(SUBJECT, GRADE));
-    await submitProbe(probeRequest('POST', {
-      answers: probe.items.map(item => ({
-        conceptId: item.conceptId,
-        chosen: item.question.correctAnswer,
-      })),
-    }));
+    await sitProbe();
 
     const row = await executeSql<{ mastery_source: string }>(
       'SELECT mastery_source FROM progress WHERE student_id = $1 AND concept_id = $2',

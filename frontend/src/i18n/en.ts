@@ -185,6 +185,7 @@ export const en: Dictionary = {
   'timeline.title': 'Timeline',
   'timeline.empty': 'Nothing recorded yet.',
   'timeline.attempt': '{concept} quiz: {correct} of {answered} correct',
+  'timeline.placementAttempt': 'Placement probe · {correct} of {answered} correct',
   'timeline.attemptScore': 'score {score}%',
   'timeline.decision.next_concept': 'Next concept: {concept}',
   'timeline.decision.remediation': 'Sent to review',
@@ -220,6 +221,7 @@ export const en: Dictionary = {
   'placement.placed_plural': 'You already showed mastery of {count} concepts. We will start above them.',
   'placement.placedNone': 'We will start at the beginning of this subject — the best place to build a solid base.',
   'placement.goLearn': 'Go to lessons',
+  'placement.expired': 'This placement timed out. Start it again so the result reflects one sitting.',
   'placement.unavailable': 'This subject has no placement test yet.',
   'placement.offer': 'Take the placement test',
 

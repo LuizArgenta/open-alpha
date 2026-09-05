@@ -189,6 +189,7 @@ export const ptBR = {
   'timeline.title': 'Linha do tempo',
   'timeline.empty': 'Nada registrado ainda.',
   'timeline.attempt': 'Prova de {concept}: {correct} de {answered} certas',
+  'timeline.placementAttempt': 'Nivelamento · {correct} de {answered} corretas',
   'timeline.attemptScore': 'nota {score}%',
   'timeline.decision.next_concept': 'Próximo conceito: {concept}',
   'timeline.decision.remediation': 'Encaminhado para reforço',
@@ -224,6 +225,7 @@ export const ptBR = {
   'placement.placed_plural': 'Você já demonstrou domínio em {count} conceitos. Vamos começar acima deles.',
   'placement.placedNone': 'Vamos começar do início desta matéria — é o melhor lugar para construir uma base firme.',
   'placement.goLearn': 'Ir para as aulas',
+  'placement.expired': 'Este nivelamento expirou. Comece de novo para que o resultado corresponda a uma sentada só.',
   'placement.unavailable': 'Esta matéria ainda não tem teste de nivelamento.',
   'placement.offer': 'Fazer o teste de nivelamento',
 
