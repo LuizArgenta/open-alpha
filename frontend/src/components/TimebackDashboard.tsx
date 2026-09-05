@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../App';
-import WasteMeter from './WasteMeter';
+import WasteMeter, { type FocusReason } from './WasteMeter';
 
 interface TimebackData {
   today: {
@@ -17,6 +17,8 @@ interface TimebackData {
     focusScore: number;
     rapidGuessCount: number;
     idleTimeouts: number;
+    walkedAwayCount: number;
+    reasons: FocusReason[];
   };
   timeback: {
     dailyProgress: number;
@@ -32,24 +34,38 @@ export default function TimebackDashboard() {
   const { token } = useAuth();
   const [data, setData] = useState<TimebackData | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch('/api/progress/timeback', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          setData(await res.json());
-        }
-      } catch {
-        // Silently fail — not critical
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/progress/timeback', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setData(await res.json());
       }
+    } catch {
+      // Silently fail — not critical
     }
+  }, [token]);
+
+  useEffect(() => {
     load();
     // Refresh every 60 seconds while the component is mounted
     const interval = setInterval(load, 60000);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [load]);
+
+  async function contest(code: FocusReason['code']) {
+    try {
+      await fetch('/api/progress/contest', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pattern: code }),
+      });
+      await load();
+    } catch {
+      // Silently fail — not critical
+    }
+  }
 
   if (!data) return null;
 
@@ -113,10 +129,9 @@ export default function TimebackDashboard() {
       {/* Waste Meter */}
       <div className="card" style={{ padding: '1.25rem' }}>
         <WasteMeter
-          wasteScore={wasteMeter.score}
           focusScore={wasteMeter.focusScore}
-          rapidGuessCount={wasteMeter.rapidGuessCount}
-          idleTimeouts={wasteMeter.idleTimeouts}
+          reasons={wasteMeter.reasons ?? []}
+          onContest={contest}
         />
       </div>
 

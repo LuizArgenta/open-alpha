@@ -2,12 +2,13 @@ import { executeSql } from '../../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../../_lib/auth.js';
 import {
   MASTERY_THRESHOLD,
+  getConcept,
   getConceptWithLesson,
   resolveRemediation,
   toProgressMap,
 } from '../../_lib/curriculum.js';
 import { scheduleAfterLapse, scheduleAfterMastery } from '../../_lib/review.js';
-import { type AnswerEvent, diagnoseAttempt } from '../../_lib/diagnosis.js';
+import { type AnswerEvent, diagnoseAttempt, rapidAnswerThresholdMs } from '../../_lib/diagnosis.js';
 
 interface Progress {
   mastery_score: number;
@@ -156,6 +157,9 @@ export async function POST(request: Request) {
     const diagnosis = diagnoseAttempt({
       answers: await loadAttemptAnswers(auth.userId, subject, conceptId),
       priorAttempts,
+      rapidThresholdMs: rapidAnswerThresholdMs(
+        getConcept(subject, conceptId)?.metadata?.difficulty
+      ),
     });
 
     return Response.json({
