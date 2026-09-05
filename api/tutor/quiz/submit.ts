@@ -1,5 +1,5 @@
 import { executeSql } from '../../_lib/db.js';
-import { getAuthFromRequest, unauthorized } from '../../_lib/auth.js';
+import { forbidden, getAuthFromRequest, unauthorized } from '../../_lib/auth.js';
 import {
   MASTERY_THRESHOLD,
   getConcept,
@@ -17,42 +17,35 @@ import {
 import { awardXp } from '../../_lib/xp.js';
 import { recordDecision } from '../../_lib/decisions.js';
 
-interface SubmittedResponse {
-  itemId?: number;
-  chosen?: string;
-  correct: boolean;
-  responseTimeMs?: number;
+interface AttemptRow {
+  student_id: number;
+  subject: string;
+  concept_id: string;
+  finished_at: string | null;
 }
 
 /**
- * Writes down which question the student answered and how, then closes the
- * attempt. Without this the score is the only surviving evidence, and no
- * adult can ever ask which item was missed.
+ * The score, computed from what the server graded and stored — never from
+ * what the client reports. Unanswered items count as wrong: skipping a
+ * question must not be a way to raise a score.
  */
-async function recordResponses(
-  attemptId: number,
-  score: number,
-  responses: SubmittedResponse[]
-): Promise<void> {
-  for (const response of responses) {
-    if (response.itemId === undefined) continue;
-    await executeSql(
-      `INSERT INTO assessment_responses (attempt_id, item_id, chosen, correct, response_ms)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        attemptId,
-        response.itemId,
-        response.chosen ?? null,
-        response.correct ? 1 : 0,
-        response.responseTimeMs ?? null,
-      ]
-    );
-  }
-
-  await executeSql(
-    `UPDATE assessment_attempts SET score = $1, finished_at = datetime('now') WHERE id = $2`,
-    [score, attemptId]
+async function scoreFromStoredAnswers(attemptId: number): Promise<{ score: number; answered: number; total: number }> {
+  const totals = await executeSql<{ total: number; answered: number; correct: number }>(
+    `SELECT
+       (SELECT COUNT(*) FROM assessment_attempt_items WHERE attempt_id = $1) as total,
+       (SELECT COUNT(*) FROM assessment_responses WHERE attempt_id = $2) as answered,
+       (SELECT COALESCE(SUM(correct), 0) FROM assessment_responses WHERE attempt_id = $3) as correct`,
+    [attemptId, attemptId, attemptId]
   );
+
+  const total = Number(totals.rows[0]?.total ?? 0);
+  const correct = Number(totals.rows[0]?.correct ?? 0);
+
+  return {
+    score: total > 0 ? Math.round((correct / total) * 100) : 0,
+    answered: Number(totals.rows[0]?.answered ?? 0),
+    total,
+  };
 }
 
 interface Progress {
@@ -61,43 +54,33 @@ interface Progress {
   attempts: number;
 }
 
-interface EventRow {
-  event_type: string;
-  payload: string;
-  created_at: string;
+interface StoredAnswerRow {
+  correct: number;
+  response_ms: number | null;
+  answered_at: string;
 }
 
 /**
- * The answers from the quiz that was just submitted: everything logged since
- * the most recent quiz_start for this concept.
+ * The answers as the server graded them. This used to read learning_events,
+ * whose `correct` flag was whatever the browser posted — so the diagnosis
+ * that decides between "rushed" and "has a real gap" was reasoning over the
+ * student's own claims.
  */
-async function loadAttemptAnswers(
-  studentId: number,
-  subject: string,
-  conceptId: string
-): Promise<AnswerEvent[]> {
-  const events = await executeSql<EventRow>(
-    `SELECT event_type, payload, created_at FROM learning_events
-     WHERE student_id = $1 AND subject = $2 AND concept_id = $3
-     ORDER BY created_at DESC, id DESC
-     LIMIT 60`,
-    [studentId, subject, conceptId]
+async function loadAttemptAnswers(attemptId: number): Promise<AnswerEvent[]> {
+  const rows = await executeSql<StoredAnswerRow>(
+    `SELECT r.correct, r.response_ms, r.answered_at
+     FROM assessment_responses r
+     JOIN assessment_attempt_items i ON i.attempt_id = r.attempt_id AND i.item_id = r.item_id
+     WHERE r.attempt_id = $1
+     ORDER BY i.position`,
+    [attemptId]
   );
 
-  const answers: AnswerEvent[] = [];
-  for (const event of events.rows) {
-    if (event.event_type === 'quiz_start') break;
-    if (event.event_type !== 'quiz_answer') continue;
-
-    const payload = JSON.parse(event.payload || '{}');
-    answers.push({
-      correct: payload.correct === true,
-      responseTimeMs: payload.responseTimeMs,
-      at: event.created_at,
-    });
-  }
-
-  return answers.reverse();
+  return rows.rows.map(row => ({
+    correct: row.correct === 1,
+    responseTimeMs: row.response_ms ?? undefined,
+    at: row.answered_at,
+  }));
 }
 
 interface SubjectProgressRow {
@@ -136,18 +119,35 @@ export async function POST(request: Request) {
     const auth = getAuthFromRequest(request);
     if (!auth || auth.role !== 'student') return unauthorized();
 
-    const body = await request.json() as {
-      subject: string;
-      conceptId: string;
-      score: number;
-      attemptId?: number;
-      responses?: SubmittedResponse[];
-    };
-    const { subject, conceptId, score, attemptId, responses } = body;
+    // The attempt is the whole input. Subject, concept and score come from
+    // the server's own record of it, so none of them can be asserted by the
+    // client any more.
+    const body = await request.json() as { attemptId?: number };
 
-    if (!subject || !conceptId || score === undefined) {
-      return Response.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!Number.isInteger(body.attemptId)) {
+      return Response.json({ error: 'attemptId is required' }, { status: 400 });
     }
+    const attemptId = body.attemptId as number;
+
+    const attemptRow = await executeSql<AttemptRow>(
+      'SELECT student_id, subject, concept_id, finished_at FROM assessment_attempts WHERE id = $1',
+      [attemptId]
+    );
+    if (attemptRow.rows.length === 0) {
+      return Response.json({ error: 'Attempt not found' }, { status: 404 });
+    }
+
+    const attempt = attemptRow.rows[0];
+    if (attempt.student_id !== auth.userId) return forbidden();
+
+    // Finishing twice would award XP twice and re-run the schedule.
+    if (attempt.finished_at !== null) {
+      return Response.json({ error: 'Attempt already finished' }, { status: 409 });
+    }
+
+    const subject = attempt.subject;
+    const conceptId = attempt.concept_id;
+    const { score } = await scoreFromStoredAnswers(attemptId);
 
     const existingProgress = await executeSql<Progress>(
       'SELECT mastery_score, review_interval_days, attempts FROM progress WHERE student_id = $1 AND subject = $2 AND concept_id = $3',
@@ -156,9 +156,10 @@ export async function POST(request: Request) {
 
     const priorAttempts = existingProgress.rows[0]?.attempts ?? 0;
 
-    if (attemptId !== undefined) {
-      await recordResponses(attemptId, score, responses ?? []);
-    }
+    await executeSql(
+      `UPDATE assessment_attempts SET score = $1, finished_at = datetime('now') WHERE id = $2`,
+      [score, attemptId]
+    );
 
     // This attempt, not the all-time best: mastery_score never regresses, so it
     // is the raw score that tells us whether the concept held up today.
@@ -217,7 +218,7 @@ export async function POST(request: Request) {
     // Read once: both the diagnosis and the XP award are about the quality of
     // this attempt, not of the day.
     const concept = getConcept(subject, conceptId);
-    const answers = await loadAttemptAnswers(auth.userId, subject, conceptId);
+    const answers = await loadAttemptAnswers(attemptId);
     const rapidThresholdMs = rapidAnswerThresholdMs(concept?.metadata?.difficulty);
 
     const diagnosis = diagnoseAttempt({ answers, priorAttempts, rapidThresholdMs });

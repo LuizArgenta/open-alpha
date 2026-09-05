@@ -11,6 +11,7 @@ import { executeSql, initializeSchema } from '../../api/_lib/db.js';
 /** Children before parents: anything referencing users is deleted first. */
 const TABLES_IN_DEPENDENCY_ORDER = [
   'assessment_responses',
+  'assessment_attempt_items',
   'assessment_attempts',
   'assessment_items',
   'learning_decisions',
@@ -55,4 +56,49 @@ export async function linkParentToChild(parentId: number, childId: number): Prom
      VALUES ($1, $2, $3, datetime('now'))`,
     [parentId, childId, `code-${Math.random()}`]
   );
+}
+
+/**
+ * Sits a real quiz: opens an attempt, answers through the grading endpoint and
+ * submits. Tests used to post a score directly, which is exactly the hole the
+ * integrity work closed — so they now have to earn the score they assert on.
+ */
+export async function takeQuiz(
+  token: string,
+  subject: string,
+  conceptId: string,
+  correctAnswers: number,
+  /** Client-reported pace, which is what the focus signals read. */
+  responseTimeMs?: number
+): Promise<any> {
+  const { POST: buildQuiz } = await import('../../api/tutor/quiz.js');
+  const { POST: answerQuiz } = await import('../../api/tutor/quiz/answer.js');
+  const { POST: submitQuiz } = await import('../../api/tutor/quiz/submit.js');
+
+  const call = (handler: (r: Request) => Promise<Response>, body: unknown) =>
+    handler(new Request('https://test.local/api', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }));
+
+  const quiz = await (await call(buildQuiz, { subject, conceptId })).json() as {
+    attemptId: number;
+    questions: { itemId: number }[];
+  };
+
+  for (const [index, question] of quiz.questions.entries()) {
+    const key = await executeSql<{ correct_answer: string }>(
+      'SELECT correct_answer FROM assessment_items WHERE id = $1',
+      [question.itemId]
+    );
+    const right = key.rows[0].correct_answer;
+    const chosen = index < correctAnswers
+      ? right
+      : ['A', 'B', 'C', 'D'].find(letter => letter !== right)!;
+
+    await call(answerQuiz, { attemptId: quiz.attemptId, itemId: question.itemId, chosen, responseTimeMs });
+  }
+
+  return (await call(submitQuiz, { attemptId: quiz.attemptId })).json();
 }

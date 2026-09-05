@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { executeSql, initializeSchema } from '../api/_lib/db.js';
 import { signToken } from '../api/_lib/auth.js';
-import { resetDatabase } from './helpers/database.js';
+import { createUser, resetDatabase, takeQuiz } from './helpers/database.js';
 import { POST as submitQuiz } from '../api/tutor/quiz/submit.js';
 import { GET as getReviewQueue } from '../api/progress/review.js';
 import { REVIEW_INTERVALS_DAYS } from '../api/_lib/review.js';
@@ -29,15 +29,12 @@ async function createStudent(gradeLevel = 4) {
   return result.rows[0].id;
 }
 
-async function submit(conceptId: string, score: number) {
-  const response = await submitQuiz(
-    new Request('https://test.local/api/tutor/quiz/submit', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ subject: 'math', conceptId, score }),
-    })
-  );
-  return response.json() as Promise<any>;
+/**
+ * Sits the quiz for real, answering `correct` of the five questions right.
+ * Tests used to post a score; that is precisely the hole that was closed.
+ */
+async function submit(conceptId: string, correct: number, responseTimeMs?: number) {
+  return takeQuiz(token, 'math', conceptId, correct, responseTimeMs);
 }
 
 async function progressRow(conceptId: string) {
@@ -84,13 +81,13 @@ async function logAnswers(
 
 beforeEach(async () => {
   await resetDatabase();
-  studentId = await createStudent();
+  studentId = await createUser('student');
   token = signToken({ userId: studentId, role: 'student' });
 });
 
 describe('quiz submission', () => {
   it('records a pass and schedules the first review', async () => {
-    const result = await submit(FRACTIONS, 100);
+    const result = await submit(FRACTIONS, 5);
 
     expect(result.passed).toBe(true);
     expect(result.remediation).toBeUndefined();
@@ -106,7 +103,7 @@ describe('quiz submission', () => {
   it('climbs the review ladder across successive passes', async () => {
     const intervals: (number | null)[] = [];
     for (let pass = 0; pass < 3; pass++) {
-      await submit(FRACTIONS, 100);
+      await submit(FRACTIONS, 5);
       intervals.push((await progressRow(FRACTIONS)).review_interval_days);
     }
 
@@ -114,11 +111,11 @@ describe('quiz submission', () => {
   });
 
   it('drops a forgotten concept back to the first rung without lowering mastery', async () => {
-    await submit(FRACTIONS, 100);
-    await submit(FRACTIONS, 100);
+    await submit(FRACTIONS, 5);
+    await submit(FRACTIONS, 5);
     expect((await progressRow(FRACTIONS)).review_interval_days).toBe(REVIEW_INTERVALS_DAYS[1]);
 
-    await submit(FRACTIONS, 40);
+    await submit(FRACTIONS, 2);
 
     const row = await progressRow(FRACTIONS);
     expect(row.review_interval_days).toBe(REVIEW_INTERVALS_DAYS[0]);
@@ -126,7 +123,7 @@ describe('quiz submission', () => {
   });
 
   it('does not schedule reviews for a concept that was never passed', async () => {
-    await submit(DECIMALS, 20);
+    await submit(DECIMALS, 1);
 
     const row = await progressRow(DECIMALS);
     expect(row.next_review_at).toBeNull();
@@ -135,9 +132,7 @@ describe('quiz submission', () => {
   });
 
   it('answers a failure with a concrete next step instead of "try again"', async () => {
-    await logAnswers(DECIMALS, Array(5).fill({ correct: false, responseTimeMs: 25000 }));
-
-    const result = await submit(DECIMALS, 20);
+    const result = await submit(DECIMALS, 1, 25000);
 
     expect(result.passed).toBe(false);
     expect(result.diagnosis).toBe('high_difficulty');
@@ -146,9 +141,7 @@ describe('quiz submission', () => {
   });
 
   it('does not send a rushing student to a prerequisite', async () => {
-    await logAnswers(DECIMALS, Array(5).fill({ correct: false, responseTimeMs: 1200 }));
-
-    const result = await submit(DECIMALS, 20);
+    const result = await submit(DECIMALS, 0, 1200);
 
     expect(result.diagnosis).toBe('rapid_guessing');
     expect(result.remediation.conceptId).toBeUndefined();
@@ -156,14 +149,8 @@ describe('quiz submission', () => {
   });
 
   it('escalates to a conceptual gap on the second careful failure', async () => {
-    const careful = Array(5).fill({ correct: false, responseTimeMs: 25000 });
-
-    await logAnswers(DECIMALS, careful);
-    const first = await submit(DECIMALS, 20);
-
-    await executeSql('DELETE FROM learning_events');
-    await logAnswers(DECIMALS, careful);
-    const second = await submit(DECIMALS, 20);
+    const first = await submit(DECIMALS, 1, 25000);
+    const second = await submit(DECIMALS, 1, 25000);
 
     expect(first.diagnosis).toBe('high_difficulty');
     expect(second.diagnosis).toBe('conceptual_gap');
@@ -193,7 +180,7 @@ describe('review queue', () => {
   }
 
   it('holds a concept back until its review falls due', async () => {
-    await submit(FRACTIONS, 100);
+    await submit(FRACTIONS, 5);
     expect((await readQueue()).review).toHaveLength(0);
 
     await executeSql(
@@ -210,7 +197,7 @@ describe('review queue', () => {
   it('still surfaces rows mastered before scheduling existed', async () => {
     // Legacy rows have no next_review_at; the old 7-day window keeps them in
     // the queue until their next pass puts them on the ladder.
-    await submit(FRACTIONS, 100);
+    await submit(FRACTIONS, 5);
     await executeSql(
       `UPDATE progress
        SET next_review_at = NULL, review_interval_days = NULL,

@@ -9,9 +9,8 @@ import { executeSql, initializeSchema } from '../api/_lib/db.js';
 import { signToken } from '../api/_lib/auth.js';
 import { GET as getTimeline } from '../api/parent/children/[childId]/timeline.js';
 import { POST as postOverride } from '../api/parent/children/[childId]/override.js';
-import { POST as submitQuiz } from '../api/tutor/quiz/submit.js';
 import { MASTERY_THRESHOLD } from '../api/_lib/curriculum.js';
-import { createUser, linkParentToChild, resetDatabase } from './helpers/database.js';
+import { createUser, linkParentToChild, resetDatabase, takeQuiz } from './helpers/database.js';
 
 const SUBJECT = 'math';
 const CONCEPT = 'math-fractions-intro';
@@ -91,16 +90,7 @@ describe('timeline contents', () => {
   });
 
   it('shows the decisions the engine made about a failed attempt', async () => {
-    await submitQuiz(
-      new Request('https://test.local/api/tutor/quiz/submit', {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${signToken({ userId: childId, role: 'student' })}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ subject: SUBJECT, conceptId: CONCEPT, score: 20 }),
-      })
-    );
+    await takeQuiz(signToken({ userId: childId, role: 'student' }), SUBJECT, CONCEPT, 1);
 
     const { body } = await readTimeline();
     const kinds = body.events.filter((e: any) => e.type === 'decision').map((e: any) => e.kind);

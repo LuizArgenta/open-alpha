@@ -7,6 +7,15 @@ interface User {
   grade_level: number | null;
 }
 
+/**
+ * What the student may see: the question and its options, never the answer.
+ * The full item stays on the server, which is the only thing that makes
+ * server-side grading meaningful.
+ */
+function withoutAnswerKey(question: QuizQuestion, itemId: number) {
+  return { itemId, question: question.question, options: question.options };
+}
+
 interface QuizQuestion {
   question: string;
   options: string[];
@@ -73,8 +82,18 @@ async function openAttempt(
      VALUES ($1, $2, $3, $4) RETURNING id`,
     [studentId, subject, conceptId, language]
   );
+  const attemptId = attempt.rows[0].id;
 
-  return { attemptId: attempt.rows[0].id, itemIds };
+  // The server's own record of what this attempt consists of. Without it an
+  // answer could claim to belong to any attempt.
+  for (const [position, itemId] of itemIds.entries()) {
+    await executeSql(
+      'INSERT INTO assessment_attempt_items (attempt_id, item_id, position) VALUES ($1, $2, $3)',
+      [attemptId, itemId, position]
+    );
+  }
+
+  return { attemptId, itemIds };
 }
 
 export async function POST(request: Request) {
@@ -115,7 +134,7 @@ export async function POST(request: Request) {
       );
       return Response.json({
         attemptId,
-        questions: questions.map((q, index) => ({ ...q, itemId: itemIds[index] })),
+        questions: questions.map((q, index) => withoutAnswerKey(q, itemIds[index])),
       });
     }
 
@@ -166,7 +185,7 @@ export async function POST(request: Request) {
 
     return Response.json({
       attemptId,
-      questions: questions.map((q, index) => ({ ...q, itemId: itemIds[index] })),
+      questions: questions.map((q, index) => withoutAnswerKey(q, itemIds[index])),
     });
   } catch (error) {
     console.error('Quiz generation error:', error);
