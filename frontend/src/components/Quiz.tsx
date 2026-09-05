@@ -44,6 +44,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   const [error, setError] = useState('');
   const [finished, setFinished] = useState(false);
   const [remediation, setRemediation] = useState<Remediation | null>(null);
+  const [xp, setXp] = useState<{ amount: number; reason: string } | null>(null);
 
   useEffect(() => {
     fetchQuiz();
@@ -109,6 +110,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
 
       const data = await res.json();
       if (data.remediation) setRemediation(data.remediation);
+      if (data.xp) setXp(data.xp);
     } catch (error) {
       console.error('Failed to submit results:', error);
     }
@@ -219,9 +221,22 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
             {t('quiz.scored', { score })}
           </p>
 
-          <p style={{ color: 'var(--text-light)', marginBottom: '1.5rem' }}>
+          <p style={{ color: 'var(--text-light)', marginBottom: '1rem' }}>
             {t('quiz.correctCount', { correct: correctCount, total: questions.length })}
           </p>
+
+          {xp && (
+            <div style={{ marginBottom: '1.5rem' }}>
+              {xp.amount > 0 && (
+                <div style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--success)' }}>
+                  {t('xp.earned', { amount: xp.amount })}
+                </div>
+              )}
+              <div style={{ fontSize: '0.8125rem', color: 'var(--text-light)' }}>
+                {serverText(`xp.reason.${xp.reason}`)}
+              </div>
+            </div>
+          )}
 
           {passed ? (
             <p style={{ color: 'var(--success)', marginBottom: '1.5rem' }}>

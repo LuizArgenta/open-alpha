@@ -164,6 +164,18 @@ export const ptBR = {
   'alert.neverStarted.title': 'Ainda sem sessões',
   'alert.neverStarted.detail': 'Ainda não começou nenhuma sessão.',
 
+  // ── XP ────────────────────────────────────────────────────────────────────
+  'xp.title': 'XP de hoje',
+  'xp.progress': '{earned} de {goal} XP',
+  'xp.goalReached': 'Meta do dia batida!',
+  'xp.earned': '+{amount} XP',
+  'xp.reason.mastery_focused': 'Dominado com foco',
+  'xp.reason.mastery_first_try': 'Gabaritou de primeira',
+  'xp.reason.mastery_partial': 'Dominado, mas com alguma distração',
+  'xp.reason.mastery_wasteful': 'Dominado com muita distração',
+  'xp.reason.no_mastery': 'Sem XP: o conceito ainda não foi dominado',
+  'xp.reason.gaming': 'Sem XP: as respostas vieram no chute',
+
   // ── Settings ──────────────────────────────────────────────────────────────
   'settings.title': 'Configurações',
   'settings.profile': 'Perfil',

@@ -207,6 +207,17 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- XP awarded per mastery attempt (evidence of learning, not time spent)
+    CREATE TABLE IF NOT EXISTS xp_awards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      subject TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Student pushback on a focus signal ("I wasn't guessing")
     CREATE TABLE IF NOT EXISTS focus_contests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,6 +247,15 @@ export async function initializeSchema(): Promise<void> {
     // Spaced review scheduling
     'ALTER TABLE progress ADD COLUMN next_review_at TEXT',
     'ALTER TABLE progress ADD COLUMN review_interval_days INTEGER',
+    `CREATE TABLE IF NOT EXISTS xp_awards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      subject TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
     `CREATE TABLE IF NOT EXISTS focus_contests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       student_id INTEGER REFERENCES users(id),

@@ -160,6 +160,18 @@ export const en: Dictionary = {
   'alert.neverStarted.title': 'No sessions yet',
   'alert.neverStarted.detail': "They haven't started a session yet.",
 
+  // ── XP ────────────────────────────────────────────────────────────────────
+  'xp.title': "Today's XP",
+  'xp.progress': '{earned} of {goal} XP',
+  'xp.goalReached': 'Daily goal reached!',
+  'xp.earned': '+{amount} XP',
+  'xp.reason.mastery_focused': 'Mastered with focus',
+  'xp.reason.mastery_first_try': 'Perfect on the first try',
+  'xp.reason.mastery_partial': 'Mastered, with some distraction',
+  'xp.reason.mastery_wasteful': 'Mastered with heavy distraction',
+  'xp.reason.no_mastery': 'No XP: the concept is not mastered yet',
+  'xp.reason.gaming': 'No XP: the answers were guesses',
+
   // ── Settings ──────────────────────────────────────────────────────────────
   'settings.title': 'Settings',
   'settings.profile': 'Profile',

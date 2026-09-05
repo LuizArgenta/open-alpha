@@ -8,7 +8,13 @@ import {
   toProgressMap,
 } from '../../_lib/curriculum.js';
 import { scheduleAfterLapse, scheduleAfterMastery } from '../../_lib/review.js';
-import { type AnswerEvent, diagnoseAttempt, rapidAnswerThresholdMs } from '../../_lib/diagnosis.js';
+import {
+  type AnswerEvent,
+  attemptFocusScore,
+  diagnoseAttempt,
+  rapidAnswerThresholdMs,
+} from '../../_lib/diagnosis.js';
+import { awardXp } from '../../_lib/xp.js';
 
 interface Progress {
   mastery_score: number;
@@ -143,30 +149,47 @@ export async function POST(request: Request) {
 
     const passed = newScore >= MASTERY_THRESHOLD;
 
+    // Read once: both the diagnosis and the XP award are about the quality of
+    // this attempt, not of the day.
+    const concept = getConcept(subject, conceptId);
+    const answers = await loadAttemptAnswers(auth.userId, subject, conceptId);
+    const rapidThresholdMs = rapidAnswerThresholdMs(concept?.metadata?.difficulty);
+
+    const diagnosis = diagnoseAttempt({ answers, priorAttempts, rapidThresholdMs });
+
+    const xp = awardXp({
+      score,
+      focusScore: attemptFocusScore(answers, rapidThresholdMs),
+      priorAttempts,
+      estimatedMinutes: concept?.metadata?.estimatedMinutes,
+      gamed: diagnosis.pattern === 'rapid_guessing',
+    });
+
+    if (xp.amount !== 0) {
+      await executeSql(
+        'INSERT INTO xp_awards (student_id, subject, concept_id, amount, reason) VALUES ($1, $2, $3, $4, $5)',
+        [auth.userId, subject, conceptId, xp.amount, xp.reason]
+      );
+    }
+
     if (passed) {
       return Response.json({
         masteryScore: newScore,
         passed,
         message: "Congratulations! You've mastered this concept!",
+        xp,
       });
     }
 
     // Why they failed decides what to offer: a student who rushed or walked
     // away hasn't shown a knowledge gap, so sending them to a prerequisite
     // would be answering the wrong question.
-    const diagnosis = diagnoseAttempt({
-      answers: await loadAttemptAnswers(auth.userId, subject, conceptId),
-      priorAttempts,
-      rapidThresholdMs: rapidAnswerThresholdMs(
-        getConcept(subject, conceptId)?.metadata?.difficulty
-      ),
-    });
-
     return Response.json({
       masteryScore: newScore,
       passed,
       message: 'Keep practicing to reach 80% mastery.',
       diagnosis: diagnosis.pattern,
+      xp,
       remediation: diagnosis.isAttention
         ? {
             action: 'extra_practice',
