@@ -219,6 +219,8 @@ interface LessonGenerationContext {
   gradeBand?: string;
   // Student interests for personalized generation
   interests?: Array<{ category: string; value: string }>;
+  // Problems found in a previous attempt, fed back so the retry can fix them
+  correctionFeedback?: string;
 }
 
 function getLessonGenerationPrompt(ctx: LessonGenerationContext): string {
@@ -264,7 +266,11 @@ Required JSON schema:
 Rules:
 - Every worked example must have at least 2 steps that explain REASONING, not just arithmetic.
 - All content must be factually accurate.
-- Return ONLY the JSON object. No wrapping, no code fences.`;
+- Return ONLY the JSON object. No wrapping, no code fences.${
+    ctx.correctionFeedback
+      ? `\n\nA previous attempt was rejected for these reasons. Fix them in this response:\n${ctx.correctionFeedback}`
+      : ''
+  }`;
 }
 
 export async function generateLesson(

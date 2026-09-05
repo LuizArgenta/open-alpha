@@ -16,6 +16,7 @@
 import { executeSql } from '../_lib/db.js';
 import { getSubject, getConcept, type Concept } from '../_lib/curriculum.js';
 import { generateLesson, LESSON_PROMPT_VERSION, type GeneratedLessonContent } from '../_lib/llm.js';
+import { validateGeneratedLesson } from '../_lib/lesson-validation.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -126,7 +127,7 @@ export async function GET(request: Request) {
     });
 
     const model = 'claude-sonnet-4-6';
-    const lesson = await generateLesson({
+    const generationContext = {
       subjectName: subject.name,
       conceptId: concept.id,
       conceptName: concept.name,
@@ -134,23 +135,65 @@ export async function GET(request: Request) {
       level: concept.gradeLevel,
       prerequisites: prerequisiteNames,
       gradeBand: concept.metadata?.gradeBand,
-    }, model);
+    };
 
-    // Cache it in the database
-    await executeSql(
-      `INSERT INTO generated_lessons (subject_id, concept_id, content, generation_model, generation_prompt_version)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT(subject_id, concept_id) DO UPDATE SET
-         content = EXCLUDED.content,
-         generation_model = EXCLUDED.generation_model,
-         generation_prompt_version = EXCLUDED.generation_prompt_version,
-         updated_at = datetime('now')`,
-      [subjectId, conceptId, JSON.stringify(lesson), model, LESSON_PROMPT_VERSION]
-    );
+    async function attemptGeneration(correctionFeedback?: string) {
+      try {
+        const lesson = await generateLesson({ ...generationContext, correctionFeedback }, model);
+        return { lesson, problems: validateGeneratedLesson(lesson).problems };
+      } catch (error) {
+        // Malformed JSON — usually a truncated response
+        return {
+          lesson: null,
+          problems: [error instanceof Error ? error.message : 'response was not valid JSON'],
+        };
+      }
+    }
+
+    let attempt = await attemptGeneration();
+    if (attempt.problems.length > 0) {
+      console.warn(
+        `Lesson generation for ${subjectId}/${conceptId} rejected: ${attempt.problems.join('; ')}`
+      );
+      attempt = await attemptGeneration(attempt.problems.join('\n'));
+    }
+
+    if (!attempt.lesson) {
+      console.error(
+        `Lesson generation for ${subjectId}/${conceptId} failed twice: ${attempt.problems.join('; ')}`
+      );
+      return Response.json(
+        { error: 'Failed to fetch or generate lesson content' },
+        { status: 500, headers: CORS_HEADERS }
+      );
+    }
+
+    const lesson = attempt.lesson;
+    const passedValidation = attempt.problems.length === 0;
+
+    // Only cache what passed. A generated lesson is written once and served to
+    // everyone who reaches this concept, so caching a bad bundle makes it the
+    // lesson indefinitely; serving it uncached lets the next request retry.
+    if (passedValidation) {
+      await executeSql(
+        `INSERT INTO generated_lessons (subject_id, concept_id, content, generation_model, generation_prompt_version)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT(subject_id, concept_id) DO UPDATE SET
+           content = EXCLUDED.content,
+           generation_model = EXCLUDED.generation_model,
+           generation_prompt_version = EXCLUDED.generation_prompt_version,
+           updated_at = datetime('now')`,
+        [subjectId, conceptId, JSON.stringify(lesson), model, LESSON_PROMPT_VERSION]
+      );
+    } else {
+      console.warn(
+        `Serving unvalidated lesson for ${subjectId}/${conceptId} without caching: ${attempt.problems.join('; ')}`
+      );
+    }
 
     return Response.json(
       {
-        source: 'generated',
+        source: passedValidation ? 'generated' : 'generated_unvalidated',
         generatedAt: new Date().toISOString(),
         promptVersion: LESSON_PROMPT_VERSION,
         concept: {
