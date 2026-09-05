@@ -347,13 +347,26 @@ export default function StudentDashboard() {
                   <p style={{ fontSize: '0.875rem', color: 'var(--text-light)' }}>
                     {subject.completed} completed · {subject.inProgress} in progress · {subject.notStarted} to go
                   </p>
-                  <Link
-                    to={`/map/${subject.subjectId}`}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ fontSize: '0.8125rem', color: 'var(--primary)', whiteSpace: 'nowrap', marginLeft: '0.75rem' }}
-                  >
-                    View map →
-                  </Link>
+                  <div style={{ display: 'flex', gap: '0.75rem', marginLeft: '0.75rem' }}>
+                    {/* Offered while the subject is untouched: placement only
+                        has something to measure before the student starts. */}
+                    {subject.completed === 0 && subject.inProgress === 0 && (
+                      <Link
+                        to={`/placement/${subject.subjectId}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ fontSize: '0.8125rem', color: 'var(--primary)', whiteSpace: 'nowrap' }}
+                      >
+                        {t('placement.offer')}
+                      </Link>
+                    )}
+                    <Link
+                      to={`/map/${subject.subjectId}`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ fontSize: '0.8125rem', color: 'var(--primary)', whiteSpace: 'nowrap' }}
+                    >
+                      View map →
+                    </Link>
+                  </div>
                 </div>
               </div>
             ))}

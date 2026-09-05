@@ -202,6 +202,22 @@ export const ptBR = {
   'override.reasonRequired': 'Escreva o motivo antes de aplicar.',
   'override.applied': 'Ajuste aplicado e registrado.',
 
+  // ── Placement ─────────────────────────────────────────────────────────────
+  'placement.title': 'Vamos ver por onde começar',
+  'placement.intro': 'Algumas perguntas rápidas para o sistema descobrir o que você já sabe, em vez de supor pela sua série. Não vale nota — errar aqui só ajuda a te colocar no lugar certo.',
+  'placement.start': 'Começar',
+  'placement.question': 'Pergunta {current} de {total}',
+  'placement.finish': 'Finalizar',
+  'placement.next': 'Próxima',
+  'placement.submitting': 'Calculando...',
+  'placement.doneTitle': 'Pronto!',
+  'placement.placed': 'Você já demonstrou domínio em {count} conceito. Vamos começar acima dele.',
+  'placement.placed_plural': 'Você já demonstrou domínio em {count} conceitos. Vamos começar acima deles.',
+  'placement.placedNone': 'Vamos começar do início desta matéria — é o melhor lugar para construir uma base firme.',
+  'placement.goLearn': 'Ir para as aulas',
+  'placement.unavailable': 'Esta matéria ainda não tem teste de nivelamento.',
+  'placement.offer': 'Fazer o teste de nivelamento',
+
   // ── Settings ──────────────────────────────────────────────────────────────
   'settings.title': 'Configurações',
   'settings.profile': 'Perfil',

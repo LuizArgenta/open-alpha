@@ -198,6 +198,22 @@ export const en: Dictionary = {
   'override.reasonRequired': 'Write the reason before applying.',
   'override.applied': 'Adjustment applied and recorded.',
 
+  // ── Placement ─────────────────────────────────────────────────────────────
+  'placement.title': "Let's find where to start",
+  'placement.intro': 'A few quick questions so the system can find out what you already know, instead of assuming from your grade. This is not graded — getting one wrong only helps place you correctly.',
+  'placement.start': 'Start',
+  'placement.question': 'Question {current} of {total}',
+  'placement.finish': 'Finish',
+  'placement.next': 'Next',
+  'placement.submitting': 'Working it out...',
+  'placement.doneTitle': 'All set!',
+  'placement.placed': 'You already showed mastery of {count} concept. We will start above it.',
+  'placement.placed_plural': 'You already showed mastery of {count} concepts. We will start above them.',
+  'placement.placedNone': 'We will start at the beginning of this subject — the best place to build a solid base.',
+  'placement.goLearn': 'Go to lessons',
+  'placement.unavailable': 'This subject has no placement test yet.',
+  'placement.offer': 'Take the placement test',
+
   // ── Settings ──────────────────────────────────────────────────────────────
   'settings.title': 'Settings',
   'settings.profile': 'Profile',

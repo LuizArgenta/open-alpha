@@ -53,13 +53,15 @@ export async function POST(request: Request) {
       await executeSql(
         `INSERT INTO progress
            (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at,
-            completed_at, next_review_at, review_interval_days)
-         VALUES ($1, $2, $3, $4, 0, datetime('now'), datetime('now'), datetime('now', $5), $6)
+            completed_at, next_review_at, review_interval_days, mastery_source, mastery_confidence)
+         VALUES ($1, $2, $3, $4, 0, datetime('now'), datetime('now'), datetime('now', $5), $6, 'override', 1.0)
          ON CONFLICT(student_id, subject, concept_id) DO UPDATE SET
            mastery_score = MAX(progress.mastery_score, EXCLUDED.mastery_score),
            completed_at = datetime('now'),
            next_review_at = EXCLUDED.next_review_at,
-           review_interval_days = EXCLUDED.review_interval_days`,
+           review_interval_days = EXCLUDED.review_interval_days,
+           mastery_source = 'override',
+           mastery_confidence = 1.0`,
         [access.childId, subject, conceptId, MASTERY_THRESHOLD, schedule.modifier, schedule.intervalDays]
       );
     } else {
