@@ -16,6 +16,7 @@ import Placement from './pages/Placement';
 import ParentDashboard from './pages/ParentDashboard';
 import ParentCoach from './pages/ParentCoach';
 import Settings from './pages/Settings';
+import AdminCurriculum from './pages/AdminCurriculum';
 
 interface User {
   id: number;
@@ -169,6 +170,16 @@ function App() {
             element={
               <ProtectedRoute role="student">
                 <Learn />
+              </ProtectedRoute>
+            }
+          />
+          {/* Staff roles live in the database, not in the token, so the page
+              itself asks the API and shows a refusal when it is not allowed. */}
+          <Route
+            path="/admin/curriculum"
+            element={
+              <ProtectedRoute>
+                <AdminCurriculum />
               </ProtectedRoute>
             }
           />
