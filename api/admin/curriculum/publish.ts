@@ -5,13 +5,15 @@
  * where authored content reaches students, so the graph is validated again
  * here — the check on save can be bypassed by editing neighbours afterwards.
  *
- * Note that published content only reaches a running instance when it reloads
- * the curriculum, which happens per serverless instance at cold start.
+ * Publishing forces this instance to reload its curriculum, so the admin who
+ * just published is not shown a stale graph. Other instances notice on their
+ * own next check.
  */
 
 import { executeSql } from '../../_lib/db.js';
 import { isDenied, requireStaff } from '../../_lib/staff.js';
 import { validateConceptGraph } from '../../_lib/curriculum-validation.js';
+import { refreshCurriculum } from '../../_lib/curriculum.js';
 
 interface ConceptRow {
   concept_id: string;
@@ -69,6 +71,11 @@ export async function POST(request: Request) {
       `UPDATE curriculum_concepts SET status = $1, updated_at = datetime('now') WHERE subject_id = $2`,
       [status, subjectId]
     );
+
+    // This instance is the one the admin is looking at: it should not tell
+    // them the subject is published and then keep serving the old graph.
+    // Other instances pick the change up on their own next check.
+    await refreshCurriculum({ force: true });
 
     return Response.json({ success: true, subjectId, status, concepts: rows.rows.length });
   } catch (error) {

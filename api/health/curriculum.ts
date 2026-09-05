@@ -27,6 +27,11 @@ export async function GET(request: Request) {
       degraded: curriculumStatus.degraded,
       reason: curriculumStatus.reason,
       loadedAt: curriculumStatus.loadedAt,
+      // How current this particular instance is, which is the question when
+      // one instance shows a concept and another does not.
+      checkedAt: curriculumStatus.checkedAt,
+      revision: curriculumStatus.revision,
+      ...(isStaff && curriculumStatus.refreshError ? { refreshError: curriculumStatus.refreshError } : {}),
       subjects: curriculumStatus.subjects,
       concepts: curriculumStatus.concepts,
       // A concept stored but unusable is missing from the graph: a student

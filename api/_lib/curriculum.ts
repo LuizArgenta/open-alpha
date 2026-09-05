@@ -408,6 +408,15 @@ export interface CurriculumStatus {
    * but a student whose progress points at one of these has nowhere to go.
    */
   invalidRecords: RecordProblem[];
+  /**
+   * Fingerprint of the published curriculum this graph was built from. What a
+   * refresh compares against to decide whether it has anything to do.
+   */
+  revision: string;
+  /** When this instance last checked whether it was out of date. */
+  checkedAt: string;
+  /** Why the last check could not be made, when it could not. */
+  refreshError?: string;
 }
 
 function countConcepts(loaded: Subject[]): number {
@@ -460,15 +469,21 @@ export async function resolveCurriculum(): Promise<{ loaded: Subject[]; status: 
         reason,
         error: cause === undefined ? undefined : String(cause),
         loadedAt: at,
+        checkedAt: at,
         subjects: loaded.length,
         concepts: countConcepts(loaded),
         invalidRecords: [],
+        // No revision: the files have none, so the next check has something to
+        // differ from and will try the database again.
+        revision: '',
       },
     };
   };
 
   let fromDatabase: DatabaseCurriculum;
+  let revision: string;
   try {
+    revision = await publishedRevision();
     fromDatabase = await readCurriculumFromDatabase();
   } catch (error) {
     return degrade('database_error', error);
@@ -491,23 +506,144 @@ export async function resolveCurriculum(): Promise<{ loaded: Subject[]; status: 
       origin: 'database',
       degraded: false,
       loadedAt: at,
+      checkedAt: at,
       subjects: fromDatabase.subjects.length,
       concepts: countConcepts(fromDatabase.subjects),
       invalidRecords: fromDatabase.problems,
+      revision,
     },
   };
 }
 
-// Loaded once per instance, at module evaluation, so every read below stays
-// synchronous for its callers.
+/**
+ * A fingerprint of the published curriculum, derived rather than declared.
+ *
+ * A revision column someone has to remember to bump is a revision column
+ * someone will forget to bump — and the failure is invisible, because the
+ * curriculum simply stays stale. Counts, version sum and the latest
+ * updated_at move on every publish, edit, unpublish and delete, and no writer
+ * has to know this function exists.
+ */
+export async function publishedRevision(): Promise<string> {
+  const row = await executeSql<{
+    subject_count: number;
+    concept_count: number;
+    version_sum: number;
+    concept_updated: string;
+    subject_updated: string;
+  }>(
+    `SELECT
+       (SELECT COUNT(*) FROM curriculum_subjects WHERE status = 'published') as subject_count,
+       (SELECT COUNT(*) FROM curriculum_concepts WHERE status = 'published') as concept_count,
+       (SELECT COALESCE(SUM(version), 0) FROM curriculum_concepts WHERE status = 'published') as version_sum,
+       (SELECT COALESCE(MAX(updated_at), '') FROM curriculum_concepts) as concept_updated,
+       (SELECT COALESCE(MAX(updated_at), '') FROM curriculum_subjects) as subject_updated`
+  );
+
+  const r = row.rows[0];
+  return [r.subject_count, r.concept_count, r.version_sum, r.concept_updated, r.subject_updated].join('|');
+}
+
+// Loaded once at module evaluation, so every read below stays synchronous for
+// its callers, and refreshed in the background from there.
 const resolved = await resolveCurriculum();
 
+/**
+ * The graph every read goes through.
+ *
+ * Replaced in place rather than reassigned: a dozen endpoints import this
+ * binding directly, and mutating the array they already hold is the one way to
+ * update all of them without asking each to change how it reads.
+ */
 export const subjects: Subject[] = resolved.loaded;
 
 /** What the load actually did. Read by the health endpoint and the tests. */
 export const curriculumStatus: CurriculumStatus = resolved.status;
 
+function adoptCurriculum(next: { loaded: Subject[]; status: CurriculumStatus }): void {
+  subjects.length = 0;
+  subjects.push(...next.loaded);
+  Object.assign(curriculumStatus, next.status);
+}
+
+// ── Staying current ──────────────────────────────────────────────────────────
+//
+// The curriculum was loaded at cold start and never looked at again. Each
+// serverless instance therefore served whatever was published the moment it
+// happened to boot: an admin could publish a concept, reload the page, see it
+// listed, and students on an older instance would go on not seeing it for
+// hours — with no error anywhere and no way to tell which students were
+// affected.
+//
+// Reads stay synchronous, so the check cannot block them. Instead a read marks
+// the graph as worth checking and the check runs alongside the request: an
+// instance is at worst one request behind, instead of permanently behind.
+// Anywhere that is not good enough — publishing, mainly — awaits
+// refreshCurriculum() directly.
+
+const DEFAULT_REFRESH_SECONDS = 30;
+
+function refreshIntervalMs(): number {
+  const configured = Number(process.env.CURRICULUM_REFRESH_SECONDS);
+  const seconds = Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_REFRESH_SECONDS;
+  return seconds * 1000;
+}
+
+let lastCheckedMs = Date.now();
+let inFlight: Promise<void> | null = null;
+
+/**
+ * Reloads the graph if the published curriculum has moved on.
+ *
+ * `force` skips the throttle, not the comparison: a check that finds the same
+ * revision still costs one small aggregate query and no rebuild.
+ */
+export async function refreshCurriculum({ force = false } = {}): Promise<boolean> {
+  if (!force && Date.now() - lastCheckedMs < refreshIntervalMs()) return false;
+  if (inFlight) {
+    await inFlight;
+    return false;
+  }
+
+  let changed = false;
+  inFlight = (async () => {
+    lastCheckedMs = Date.now();
+    try {
+      const revision = await publishedRevision();
+      curriculumStatus.checkedAt = new Date().toISOString();
+      delete curriculumStatus.refreshError;
+
+      // A degraded instance re-checks on every pass: it is serving the files,
+      // so any revision at all is better than what it has.
+      if (!curriculumStatus.degraded && revision === curriculumStatus.revision) return;
+
+      adoptCurriculum(await resolveCurriculum());
+      changed = true;
+    } catch (error) {
+      // A failed check is not a reason to throw away a curriculum that works.
+      curriculumStatus.refreshError = String(error);
+      console.error('[CURRICULUM_REFRESH_FAILED]', error);
+    } finally {
+      inFlight = null;
+    }
+  })();
+
+  await inFlight;
+  return changed;
+}
+
+/**
+ * Called by the synchronous readers. Starts a check without waiting for it, so
+ * a request never pays for the reload it triggers — the next one gets the
+ * fresh graph.
+ */
+function noteRead(): void {
+  if (Date.now() - lastCheckedMs < refreshIntervalMs()) return;
+  void refreshCurriculum();
+}
+
 export function getSubject(subjectId: string): Subject | undefined {
+  noteRead();
   return subjects.find(s => s.id === subjectId);
 }
 
