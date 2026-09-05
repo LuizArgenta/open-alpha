@@ -3,6 +3,8 @@ import { useAuth } from '../App';
 import Spinner from '../components/Spinner';
 import ErrorAlert from '../components/ErrorAlert';
 import { useServerText, useTranslation } from '../i18n';
+import StudentTimeline from '../components/StudentTimeline';
+import ConceptOverride from '../components/ConceptOverride';
 
 interface Child {
   id: number;
@@ -339,6 +341,14 @@ export default function ParentDashboard() {
                           <div style={{ fontSize: '0.8125rem', color: 'var(--text-light)', lineHeight: 1.5 }}>
                             {serverText(alert.detailKey, alert.detailParams)}
                           </div>
+                          {alert.subject && alert.conceptId && selectedChild && (
+                            <ConceptOverride
+                              childId={selectedChild.id}
+                              subject={alert.subject}
+                              conceptId={alert.conceptId}
+                              onApplied={() => fetchChildAnalytics(selectedChild.id)}
+                            />
+                          )}
                         </div>
                       ))}
                     </div>
@@ -451,6 +461,9 @@ export default function ParentDashboard() {
                     ))}
                   </div>
                 </div>
+
+                {selectedChild && <StudentTimeline childId={selectedChild.id} />}
+
 
                 {/* Recent Activity */}
                 {analytics?.recentActivity && analytics.recentActivity.length > 0 && (
