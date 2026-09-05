@@ -33,4 +33,7 @@ coverage/
 
 # SQLite database
 backend/data/
+# api/_lib/db.ts falls back to file:local.db when TURSO_DATABASE_URL is unset
+local.db
+tests/.tmp-test.db
 .vercel
