@@ -21,6 +21,12 @@ interface TimebackData {
     walkedAwayCount: number;
     reasons: FocusReason[];
   };
+  xp: {
+    earnedToday: number;
+    dailyGoal: number;
+    goalProgress: number;
+    goalReached: boolean;
+  };
   timeback: {
     dailyProgress: number;
     targetMinutes: number;
@@ -71,11 +77,36 @@ export default function TimebackDashboard() {
 
   if (!data) return null;
 
-  const { today, wasteMeter, timeback } = data;
+  const { today, wasteMeter, timeback, xp } = data;
   const isDone = timeback.dailyProgress >= 100;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {/* XP: proof of learning, not minutes in the seat */}
+      {xp && (
+        <div className="card" style={{ padding: '1.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h3 style={{ fontWeight: 600, fontSize: '1.125rem' }}>
+              {xp.goalReached ? t('xp.goalReached') : t('xp.title')}
+            </h3>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-light)' }}>
+              {t('xp.progress', { earned: xp.earnedToday, goal: xp.dailyGoal })}
+            </span>
+          </div>
+          <div style={{ height: '12px', background: 'var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+            <div style={{
+              height: '100%',
+              width: `${xp.goalProgress}%`,
+              background: xp.goalReached
+                ? 'linear-gradient(90deg, var(--success), #34d399)'
+                : 'linear-gradient(90deg, var(--primary), #818cf8)',
+              borderRadius: '6px',
+              transition: 'width 0.5s ease',
+            }} />
+          </div>
+        </div>
+      )}
+
       {/* Timeback Progress */}
       <div className="card" style={{ padding: '1.25rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>

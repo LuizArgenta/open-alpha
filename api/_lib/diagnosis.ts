@@ -76,6 +76,27 @@ function countLongGaps(answers: AnswerEvent[]): number {
   return gaps;
 }
 
+/**
+ * Focus for this attempt alone, 0-100. The meter in timeback.ts scores the
+ * whole day; XP is awarded per mastery check, so it needs the quality of the
+ * work that earned it, not an average over everything since morning.
+ */
+export function attemptFocusScore(
+  answers: AnswerEvent[],
+  rapidThresholdMs: number
+): number {
+  if (answers.length === 0) return 100;
+
+  const rapid = answers.filter(
+    answer => answer.responseTimeMs !== undefined && answer.responseTimeMs < rapidThresholdMs
+  ).length;
+
+  const penalty =
+    Math.round((rapid / answers.length) * 50) + Math.min(countLongGaps(answers) * 15, 30);
+
+  return Math.max(0, 100 - penalty);
+}
+
 export function diagnoseAttempt({
   answers,
   priorAttempts,

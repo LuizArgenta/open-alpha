@@ -2,6 +2,7 @@ import { executeSql } from '../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { getConcept } from '../_lib/curriculum.js';
 import { WALKED_AWAY_MS, rapidAnswerThresholdMs } from '../_lib/diagnosis.js';
+import { DAILY_XP_GOAL } from '../_lib/xp.js';
 
 interface FocusReason {
   code: 'rapid_guessing' | 'walked_away' | 'low_accuracy';
@@ -190,6 +191,15 @@ export async function GET(request: Request) {
 
     const focusScore = 100 - wasteScore;
 
+    // XP earned today: what the student proved they learned, and how well
+    // they worked while doing it.
+    const xpResult = await executeSql<{ earned: number | null }>(
+      `SELECT SUM(amount) as earned FROM xp_awards
+       WHERE student_id = $1 AND created_at >= date('now')`,
+      [auth.userId]
+    );
+    const xpEarnedToday = Number(xpResult.rows[0]?.earned ?? 0);
+
     // Timeback calculation: estimate how much time the student has "earned back"
     // by staying focused. Base: 2 hours of academic time per day (Alpha model).
     // Focused work earns timeback at a faster rate.
@@ -256,6 +266,14 @@ export async function GET(request: Request) {
         idleTimeouts,
         walkedAwayCount,
         reasons,
+      },
+      xp: {
+        earnedToday: xpEarnedToday,
+        dailyGoal: DAILY_XP_GOAL,
+        // The goal is evidence of learning, not minutes in the seat: a student
+        // who gets there in ninety minutes has earned the rest of the day.
+        goalProgress: Math.min(Math.round((xpEarnedToday / DAILY_XP_GOAL) * 100), 100),
+        goalReached: xpEarnedToday >= DAILY_XP_GOAL,
       },
       timeback: {
         dailyProgress,

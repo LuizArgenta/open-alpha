@@ -44,6 +44,18 @@ function keysIn(dictionaryPath: string): Set<string> {
   return new Set([...source.matchAll(DICTIONARY_KEY_PATTERN)].map(match => match[1]));
 }
 
+/**
+ * XP reasons are a union in the API and become 'xp.reason.<value>' on the
+ * client, so the key never appears as a literal anywhere and the scan above
+ * cannot see it.
+ */
+function xpReasons(): string[] {
+  const source = readFileSync(join(API_DIR, '_lib/xp.ts'), 'utf-8');
+  const union = source.match(/export type XpReason =([\s\S]*?);/);
+  if (!union) return [];
+  return [...union[1].matchAll(/'([a-z_]+)'/g)].map(match => match[1]);
+}
+
 describe('translation keys', () => {
   it('finds the keys the API emits', () => {
     // Guards the regex itself: a rename that breaks it would otherwise make
@@ -63,6 +75,23 @@ describe('translation keys', () => {
   it('has an English entry for every key the API emits', () => {
     const dictionary = keysIn(EN);
     const missing = [...keysEmittedByApi().keys()].filter(key => !dictionary.has(key));
+
+    expect(missing).toEqual([]);
+  });
+
+  it('has an entry for every XP reason the API can return', () => {
+    const reasons = xpReasons();
+    expect(reasons.length).toBeGreaterThan(3);
+
+    const ptBR = keysIn(PT_BR);
+    const en = keysIn(EN);
+    const missing = reasons.flatMap(reason => {
+      const key = `xp.reason.${reason}`;
+      return [
+        ...(ptBR.has(key) ? [] : [`pt-BR ${key}`]),
+        ...(en.has(key) ? [] : [`en ${key}`]),
+      ];
+    });
 
     expect(missing).toEqual([]);
   });
