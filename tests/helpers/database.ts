@@ -21,6 +21,7 @@ const TABLES_IN_DEPENDENCY_ORDER = [
   'sessions',
   'user_interests',
   'parent_links',
+  'staff_roles',
   'users',
   // Cleared too, so a run never inherits a curriculum imported by an earlier
   // one: every test file loads the curriculum when it imports curriculum.js,

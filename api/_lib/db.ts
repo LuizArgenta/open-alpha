@@ -209,6 +209,19 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Staff roles live beside the account type rather than inside it.
+    -- users.role has a CHECK constraint and half a dozen tables reference
+    -- users(id), so widening it would mean rebuilding a table with foreign
+    -- keys pointing at it. It is also truer: in a school a teacher is often
+    -- also a parent, and one column cannot hold both.
+    CREATE TABLE IF NOT EXISTS staff_roles (
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      role TEXT NOT NULL CHECK (role IN ('teacher', 'admin')),
+      granted_by INTEGER REFERENCES users(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, role)
+    );
+
     -- Curriculum as data, so it can be authored at runtime instead of only
     -- by editing files and redeploying
     CREATE TABLE IF NOT EXISTS curriculum_subjects (
@@ -331,6 +344,13 @@ export async function initializeSchema(): Promise<void> {
     // How a mastery estimate was arrived at, and how much to trust it
     "ALTER TABLE progress ADD COLUMN mastery_source TEXT DEFAULT 'quiz'",
     'ALTER TABLE progress ADD COLUMN mastery_confidence REAL DEFAULT 1.0',
+    `CREATE TABLE IF NOT EXISTS staff_roles (
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      role TEXT NOT NULL CHECK (role IN ('teacher', 'admin')),
+      granted_by INTEGER REFERENCES users(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, role)
+    )`,
     `CREATE TABLE IF NOT EXISTS curriculum_subjects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
