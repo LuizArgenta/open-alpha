@@ -290,7 +290,14 @@ function selectCandidate(
 
 export interface ResolvedRemediation {
   action: RemediationPath['action'];
-  message: string;
+  /**
+   * Authored text, in whatever language the curriculum was written in. Absent
+   * when the engine had to synthesise the guidance, in which case messageKey
+   * carries a translation key instead.
+   */
+  message?: string;
+  messageKey?: string;
+  messageParams?: Record<string, string | number>;
   conceptId?: string;
   conceptName?: string;
 }
@@ -337,7 +344,8 @@ export function resolveRemediation(
 
   return {
     action: 'review_prerequisites',
-    message: `Let's revisit ${target.name} first — it's what this concept builds on.`,
+    messageKey: 'remediation.reviewPrerequisite',
+    messageParams: { concept: target.name },
     conceptId: target.id,
     conceptName: target.name,
   };

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useAuth } from '../App';
+import { useTranslation } from '../i18n';
 
 export default function Settings() {
+  const { t } = useTranslation();
   const { user, token, updateUser } = useAuth();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [gradeLevel, setGradeLevel] = useState(user?.gradeLevel ?? 5);
@@ -54,7 +56,7 @@ export default function Settings() {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save changes');
+      setError(err instanceof Error ? err.message : t('settings.saveError'));
     } finally {
       setSaving(false);
     }
@@ -110,7 +112,7 @@ export default function Settings() {
                 id="displayName"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="How should we call you?"
+                placeholder={t('settings.namePlaceholder')}
                 style={{
                   width: '100%',
                   padding: '0.75rem',

@@ -26,8 +26,15 @@ export interface AlertProgressRow {
 export interface StudentAlert {
   code: 'stuck' | 'retention_drop' | 'reviews_overdue' | 'inactive';
   severity: 'high' | 'medium' | 'low';
-  title: string;
-  detail: string;
+  /**
+   * Translation keys plus values. Where a message has a plural form, the
+   * server picks the variant — it knows the count, and both languages split
+   * at one.
+   */
+  titleKey: string;
+  titleParams?: Record<string, string | number>;
+  detailKey: string;
+  detailParams?: Record<string, string | number>;
   subject?: string;
   conceptId?: string;
   conceptName?: string;
@@ -55,8 +62,10 @@ export function buildAlerts(
     alerts.push({
       code: 'stuck',
       severity: 'high',
-      title: `Stuck on ${row.conceptName}`,
-      detail: `${row.attempts} attempts, still at ${row.masteryScore}%. They've been sent back to an earlier concept to fill the gap — worth sitting with them on this one.`,
+      titleKey: 'alert.stuck.title',
+      titleParams: { concept: row.conceptName },
+      detailKey: 'alert.stuck.detail',
+      detailParams: { attempts: row.attempts, score: row.masteryScore },
       subject: row.subject,
       conceptId: row.conceptId,
       conceptName: row.conceptName,
@@ -76,8 +85,9 @@ export function buildAlerts(
     alerts.push({
       code: 'retention_drop',
       severity: 'medium',
-      title: `${row.conceptName} slipped`,
-      detail: 'Mastered earlier, then missed on a later check. It is back in the review rotation.',
+      titleKey: 'alert.retentionDrop.title',
+      titleParams: { concept: row.conceptName },
+      detailKey: 'alert.retentionDrop.detail',
       subject: row.subject,
       conceptId: row.conceptId,
       conceptName: row.conceptName,
@@ -97,11 +107,16 @@ export function buildAlerts(
     alerts.push({
       code: 'reviews_overdue',
       severity: overdue.length >= 3 ? 'medium' : 'low',
-      title: `${overdue.length} concept${overdue.length === 1 ? '' : 's'} due for review`,
-      detail:
-        oldestDays >= 1
-          ? `The oldest has been waiting ${oldestDays} day${oldestDays === 1 ? '' : 's'}, starting with ${oldest.conceptName}.`
-          : `Starting with ${oldest.conceptName}.`,
+      titleKey: overdue.length === 1
+        ? 'alert.reviewsOverdue.title'
+        : 'alert.reviewsOverdue.title_plural',
+      titleParams: { count: overdue.length },
+      detailKey: oldestDays < 1
+        ? 'alert.reviewsOverdue.detailToday'
+        : oldestDays === 1
+          ? 'alert.reviewsOverdue.detail'
+          : 'alert.reviewsOverdue.detail_plural',
+      detailParams: { days: oldestDays, concept: oldest.conceptName },
     });
   }
 
@@ -110,11 +125,9 @@ export function buildAlerts(
     alerts.push({
       code: 'inactive',
       severity: 'medium',
-      title: inactiveDays === null ? 'No sessions yet' : `No activity for ${inactiveDays} days`,
-      detail:
-        inactiveDays === null
-          ? "They haven't started a session yet."
-          : 'Spaced review only works if the reviews happen.',
+      titleKey: inactiveDays === null ? 'alert.neverStarted.title' : 'alert.inactive.title',
+      titleParams: inactiveDays === null ? undefined : { days: inactiveDays },
+      detailKey: inactiveDays === null ? 'alert.neverStarted.detail' : 'alert.inactive.detail',
     });
   }
 

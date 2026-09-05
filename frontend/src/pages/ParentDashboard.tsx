@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../App';
 import Spinner from '../components/Spinner';
 import ErrorAlert from '../components/ErrorAlert';
+import { useServerText, useTranslation } from '../i18n';
 
 interface Child {
   id: number;
@@ -47,8 +48,10 @@ interface Recommendation {
 interface StudentAlert {
   code: 'stuck' | 'retention_drop' | 'reviews_overdue' | 'inactive';
   severity: 'high' | 'medium' | 'low';
-  title: string;
-  detail: string;
+  titleKey: string;
+  titleParams?: Record<string, string | number>;
+  detailKey: string;
+  detailParams?: Record<string, string | number>;
   subject?: string;
   conceptId?: string;
   conceptName?: string;
@@ -70,6 +73,8 @@ const SEVERITY_COLOR: Record<StudentAlert['severity'], string> = {
 
 export default function ParentDashboard() {
   const { token } = useAuth();
+  const { t } = useTranslation();
+  const serverText = useServerText();
   const [children, setChildren] = useState<Child[]>([]);
   const [selectedChild, setSelectedChild] = useState<Child | null>(null);
   const [childProgress, setChildProgress] = useState<SubjectSummary[]>([]);
@@ -291,7 +296,7 @@ export default function ParentDashboard() {
                   className="btn btn-primary"
                   disabled={linkCode.length !== 8}
                 >
-                  Link
+                  {t('parent.link')}
                 </button>
               </div>
               {linkError && <p className="error-message">{linkError}</p>}
@@ -303,12 +308,12 @@ export default function ParentDashboard() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>
                 {selectedChild
-                  ? `${selectedChild.display_name || selectedChild.email}'s Progress`
-                  : 'Select a Child'}
+                  ? t('parent.childProgress', { name: selectedChild.display_name || selectedChild.email })
+                  : t('parent.selectChild')}
               </h3>
               {analytics?.lastActive && (
                 <span style={{ fontSize: '0.875rem', color: 'var(--text-light)' }}>
-                  Last active: {formatRelativeTime(analytics.lastActive)}
+                  {t('parent.lastActive', { when: formatRelativeTime(analytics.lastActive) })}
                 </span>
               )}
             </div>
@@ -318,7 +323,7 @@ export default function ParentDashboard() {
                 {/* What needs a decision, before the percentages */}
                 {analytics?.alerts && analytics.alerts.length > 0 && (
                   <div className="card">
-                    <h4 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Needs Attention</h4>
+                    <h4 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>{t('parent.needsAttention')}</h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                       {analytics.alerts.map((alert, index) => (
                         <div
@@ -328,9 +333,11 @@ export default function ParentDashboard() {
                             paddingLeft: '0.75rem',
                           }}
                         >
-                          <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{alert.title}</div>
+                          <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>
+                            {serverText(alert.titleKey, alert.titleParams)}
+                          </div>
                           <div style={{ fontSize: '0.8125rem', color: 'var(--text-light)', lineHeight: 1.5 }}>
-                            {alert.detail}
+                            {serverText(alert.detailKey, alert.detailParams)}
                           </div>
                         </div>
                       ))}
@@ -342,7 +349,7 @@ export default function ParentDashboard() {
                 {analytics?.struggling && analytics.struggling.length > 0 && (
                   <div className="card" style={{ background: 'rgba(239, 68, 68, 0.05)', border: '1px solid var(--error)' }}>
                     <h4 style={{ fontWeight: 600, marginBottom: '0.75rem', color: 'var(--error)' }}>
-                      Needs Extra Help
+                      {t('parent.needsExtraHelp')}
                     </h4>
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                       {analytics.struggling.map((item, index) => (
@@ -375,7 +382,7 @@ export default function ParentDashboard() {
                 {analytics?.recommendations && analytics.recommendations.length > 0 && (
                   <div className="card" style={{ background: 'rgba(34, 197, 94, 0.05)', border: '1px solid var(--success)' }}>
                     <h4 style={{ fontWeight: 600, marginBottom: '0.75rem', color: 'var(--success)' }}>
-                      Recommended Next Steps
+                      {t('parent.recommendedNext')}
                     </h4>
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                       {analytics.recommendations.map((rec, index) => (
@@ -448,7 +455,7 @@ export default function ParentDashboard() {
                 {/* Recent Activity */}
                 {analytics?.recentActivity && analytics.recentActivity.length > 0 && (
                   <div>
-                    <h4 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Recent Activity</h4>
+                    <h4 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>{t('parent.recentActivity')}</h4>
                     <div className="card">
                       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                         {analytics.recentActivity.map((activity, index) => (

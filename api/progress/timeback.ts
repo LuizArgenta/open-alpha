@@ -5,7 +5,9 @@ import { WALKED_AWAY_MS, rapidAnswerThresholdMs } from '../_lib/diagnosis.js';
 
 interface FocusReason {
   code: 'rapid_guessing' | 'walked_away' | 'low_accuracy';
-  detail: string;
+  /** Translation key plus values — the server does not know the reader's language. */
+  detailKey: string;
+  detailParams: Record<string, string | number>;
   points: number;
   contestable: boolean;
   contested: boolean;
@@ -143,7 +145,8 @@ export async function GET(request: Request) {
     if (rapidGuessCount > 0) {
       reasons.push({
         code: 'rapid_guessing',
-        detail: `${rapidGuessCount} of ${totalAnswers} answers came faster than reading the question takes`,
+        detailKey: 'focus.reason.rapidGuessing',
+        detailParams: { rapid: rapidGuessCount, total: totalAnswers },
         points: contested.has('rapid_guessing') ? 0 : rapidPoints,
         contestable: true,
         contested: contested.has('rapid_guessing'),
@@ -154,7 +157,12 @@ export async function GET(request: Request) {
     if (walkedAwayCount > 0) {
       reasons.push({
         code: 'walked_away',
-        detail: `${walkedAwayCount} long break${walkedAwayCount === 1 ? '' : 's'} in the middle of a quiz`,
+        // The server picks the plural variant: it knows the count, and both
+        // languages split at one.
+        detailKey: walkedAwayCount === 1
+          ? 'focus.reason.walkedAway'
+          : 'focus.reason.walkedAway_plural',
+        detailParams: { count: walkedAwayCount },
         points: contested.has('walked_away') ? 0 : walkedAwayPoints,
         contestable: true,
         contested: contested.has('walked_away'),
@@ -167,7 +175,8 @@ export async function GET(request: Request) {
     if (lowAccuracy) {
       reasons.push({
         code: 'low_accuracy',
-        detail: `under 40% correct across ${totalAnswers} answers`,
+        detailKey: 'focus.reason.lowAccuracy',
+        detailParams: { total: totalAnswers },
         points: 20,
         contestable: false,
         contested: false,

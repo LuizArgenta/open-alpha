@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../App';
 import Spinner from './Spinner';
+import { useServerText, useTranslation } from '../i18n';
 
 interface Question {
   question: string;
@@ -11,7 +12,11 @@ interface Question {
 
 interface Remediation {
   action: 'review_prerequisites' | 'simpler_explanation' | 'sub_skill' | 'extra_practice';
-  message: string;
+  /** Authored content, already written in the curriculum's language. */
+  message?: string;
+  /** Set when the engine synthesised the guidance instead. */
+  messageKey?: string;
+  messageParams?: Record<string, string | number>;
   conceptId?: string;
   conceptName?: string;
 }
@@ -28,6 +33,8 @@ interface QuizProps {
 
 export default function Quiz({ subject, conceptId, conceptName, onComplete, onCancel, onReviewLesson, onRemediate }: QuizProps) {
   const { token } = useAuth();
+  const { t } = useTranslation();
+  const serverText = useServerText();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -77,7 +84,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
         throw new Error('No questions received');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load quiz');
+      setError(err instanceof Error ? err.message : t('quiz.loadError'));
     } finally {
       setLoading(false);
     }
@@ -157,7 +164,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   if (loading) {
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Spinner size="large" text="Generating quiz..." />
+        <Spinner size="large" text={t('quiz.generating')} />
       </div>
     );
   }
@@ -169,10 +176,10 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
           <p style={{ color: 'var(--error)', marginBottom: '1rem' }}>{error}</p>
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
             <button onClick={fetchQuiz} className="btn btn-primary">
-              Try Again
+              {t('common.tryAgain')}
             </button>
             <button onClick={onCancel} className="btn btn-outline">
-              Go Back
+              {t('common.goBack')}
             </button>
           </div>
         </div>
@@ -205,20 +212,20 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
           </div>
 
           <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-            {passed ? 'Congratulations!' : 'Keep Practicing!'}
+            {passed ? t('quiz.passedTitle') : t('quiz.failedTitle')}
           </h2>
 
           <p style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>
-            You scored <strong>{score}%</strong>
+            {t('quiz.scored', { score })}
           </p>
 
           <p style={{ color: 'var(--text-light)', marginBottom: '1.5rem' }}>
-            {correctCount} out of {questions.length} correct
+            {t('quiz.correctCount', { correct: correctCount, total: questions.length })}
           </p>
 
           {passed ? (
             <p style={{ color: 'var(--success)', marginBottom: '1.5rem' }}>
-              You've mastered {conceptName}!
+              {t('quiz.mastered', { concept: conceptName })}
             </p>
           ) : remediation ? (
             <div style={{
@@ -230,13 +237,15 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
               textAlign: 'left',
             }}>
               <p style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.375rem' }}>
-                Here's what to do next
+                {t('quiz.whatToDoNext')}
               </p>
-              <p style={{ fontSize: '0.875rem', lineHeight: 1.5 }}>{remediation.message}</p>
+              <p style={{ fontSize: '0.875rem', lineHeight: 1.5 }}>
+                {serverText(remediation.messageKey, remediation.messageParams, remediation.message)}
+              </p>
             </div>
           ) : (
             <p style={{ color: 'var(--text-light)', marginBottom: '1.5rem' }}>
-              You need 80% to master this concept. Keep learning and try again!
+              {t('quiz.needMore')}
             </p>
           )}
 
@@ -246,7 +255,9 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
               className="btn btn-primary"
               style={{ width: '100%', marginBottom: '0.75rem' }}
             >
-              Review {remediation.conceptName ?? 'the earlier concept'}
+              {remediation.conceptName
+                ? t('quiz.reviewConcept', { concept: remediation.conceptName })
+                : t('quiz.reviewEarlier')}
             </button>
           )}
 
@@ -255,7 +266,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
             className={!passed && remediation?.conceptId && onRemediate ? 'btn btn-outline' : 'btn btn-primary'}
             style={{ width: '100%' }}
           >
-            {passed ? 'Continue Learning' : 'Back to Learning'}
+            {passed ? t('quiz.continueLearning') : t('quiz.backToLearning')}
           </button>
         </div>
       </div>
@@ -285,7 +296,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
           </span>
         </div>
         <button onClick={onCancel} style={{ background: 'none', border: 'none', color: 'var(--text-light)', cursor: 'pointer', fontSize: '0.875rem' }}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
 
@@ -348,7 +359,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
           }}
         >
           <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
-            {isCorrect ? 'Correct!' : 'Not quite right'}
+            {isCorrect ? t('quiz.correct') : t('quiz.incorrect')}
           </p>
           <p>{question.explanation}</p>
           {!isCorrect && onReviewLesson && (
@@ -361,7 +372,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
                   padding: 0,
                 }}
               >
-                ← Review the lesson
+                {t('quiz.reviewLesson')}
               </button>
             </div>
           )}
@@ -371,7 +382,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
       {/* Next Button */}
       {showExplanation && (
         <button onClick={handleNext} className="btn btn-primary" style={{ alignSelf: 'flex-end' }}>
-          {currentIndex < questions.length - 1 ? 'Next Question' : 'See Results'}
+          {currentIndex < questions.length - 1 ? t('quiz.nextQuestion') : t('quiz.seeResults')}
         </button>
       )}
     </div>

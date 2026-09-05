@@ -1,8 +1,10 @@
+import { useTranslation } from '../i18n';
 import { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../App';
 
 export default function Login() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -22,7 +24,7 @@ export default function Login() {
       }
       window.location.href = data.authorizationUrl;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setError(err instanceof Error ? err.message : t('common.somethingWentWrong'));
       setLoading(false);
     }
   };
@@ -33,7 +35,7 @@ export default function Login() {
         <Link to="/">
           <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)', marginBottom: '0.5rem' }}>Open Alpha</h1>
         </Link>
-        <p style={{ color: 'var(--text-light)', marginBottom: '2rem' }}>Free AI tutoring for every learner</p>
+        <p style={{ color: 'var(--text-light)', marginBottom: '2rem' }}>{t('auth.tagline')}</p>
 
         <button
           onClick={handleSignIn}
@@ -41,14 +43,14 @@ export default function Login() {
           className="btn btn-primary"
           style={{ width: '100%', marginBottom: '1.5rem', gap: '0.5rem' }}
         >
-          {loading ? 'Redirecting...' : 'Sign in with ATXP'}
+          {loading ? t('auth.login.redirecting') : t('auth.login.signInWithAtxp')}
         </button>
 
         {error && <p className="error-message" style={{ marginBottom: '1rem' }}>{error}</p>}
 
         <p style={{ color: 'var(--text-light)', fontSize: '0.875rem' }}>
-          New to Open Alpha?{' '}
-          <Link to="/signup">Create an account</Link>
+          {t('auth.login.newHere')}{' '}
+          <Link to="/signup">{t('auth.signup.title')}</Link>
         </p>
       </div>
     </div>

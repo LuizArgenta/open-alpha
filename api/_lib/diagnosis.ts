@@ -57,8 +57,13 @@ export interface Diagnosis {
    * anything about what the student understands.
    */
   isAttention: boolean;
-  /** Set only for attention patterns, where no remediation message applies. */
-  message?: string;
+  /**
+   * Translation key and its values, not a sentence: the student reads the app
+   * in their own language and the server does not know which one that is.
+   * Set only for attention patterns, where no remediation message applies.
+   */
+  messageKey?: string;
+  messageParams?: Record<string, string | number>;
 }
 
 function countLongGaps(answers: AnswerEvent[]): number {
@@ -90,7 +95,12 @@ export function diagnoseAttempt({
     return {
       pattern: 'rapid_guessing',
       isAttention: true,
-      message: `You answered ${rapid} of ${answers.length} questions in under ${rapidThresholdMs / 1000} seconds. Slow down and read each one — this score doesn't tell us what you actually know yet.`,
+      messageKey: 'diagnosis.rapidGuessing',
+      messageParams: {
+        rapid,
+        total: answers.length,
+        seconds: rapidThresholdMs / 1000,
+      },
     };
   }
 
@@ -98,7 +108,7 @@ export function diagnoseAttempt({
     return {
       pattern: 'distraction',
       isAttention: true,
-      message: "Looks like you stepped away in the middle of this quiz. Try it again in one sitting so the result reflects what you know.",
+      messageKey: 'diagnosis.distraction',
     };
   }
 

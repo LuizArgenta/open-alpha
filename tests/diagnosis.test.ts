@@ -45,7 +45,8 @@ describe('diagnoseAttempt', () => {
 
     expect(diagnosis.pattern).toBe('rapid_guessing');
     expect(diagnosis.isAttention).toBe(true);
-    expect(diagnosis.message).toBeTruthy();
+    expect(diagnosis.messageKey).toBe('diagnosis.rapidGuessing');
+    expect(diagnosis.messageParams).toMatchObject({ rapid: 5, total: 5 });
   });
 
   it('reads a long break mid-quiz as distraction', () => {
