@@ -75,7 +75,10 @@ describe('curriculum source parity', () => {
     const first = await importCurriculumFromFiles();
     const second = await importCurriculumFromFiles();
 
-    expect(second).toEqual(first);
+    // The second run recognises every concept as already published.
+    expect(first.created).toBe(first.concepts);
+    expect(second.concepts).toBe(0);
+    expect(second.unchanged).toBe(first.created);
 
     const count = await executeSql<{ total: number }>(
       'SELECT COUNT(*) as total FROM curriculum_concepts'
@@ -83,16 +86,38 @@ describe('curriculum source parity', () => {
     expect(Number(count.rows[0].total)).toBe(first.concepts);
   });
 
-  it('bumps a concept version when the import overwrites it', async () => {
+  it('leaves the version alone when the import changes nothing', async () => {
+    // Version answers "what did the students see last term?". Bumping it on
+    // every import made it count imports instead of changes.
     await importCurriculumFromFiles();
     await importCurriculumFromFiles();
 
-    const row = await executeSql<{ version: number }>(
-      'SELECT version FROM curriculum_concepts WHERE concept_id = $1',
+    const row = await executeSql<{ version: number; updated_at: string }>(
+      'SELECT version, updated_at FROM curriculum_concepts WHERE concept_id = $1',
       ['math-fractions-intro']
     );
 
+    expect(row.rows[0].version).toBe(1);
+  });
+
+  it('bumps the version when the stored content actually differs', async () => {
+    await importCurriculumFromFiles();
+    await executeSql(
+      `UPDATE curriculum_concepts SET name = 'Edited elsewhere', content_hash = 'stale'
+       WHERE concept_id = $1`,
+      ['math-fractions-intro']
+    );
+
+    const result = await importCurriculumFromFiles();
+
+    const row = await executeSql<{ version: number; name: string }>(
+      'SELECT version, name FROM curriculum_concepts WHERE concept_id = $1',
+      ['math-fractions-intro']
+    );
+
+    expect(result.updated).toBe(1);
     expect(row.rows[0].version).toBe(2);
+    expect(row.rows[0].name).not.toBe('Edited elsewhere');
   });
 
   it('hides unpublished concepts from the engine', async () => {

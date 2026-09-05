@@ -10,6 +10,8 @@ interface Health {
   error?: string;
   subjects: number;
   concepts: number;
+  invalidRecords: number;
+  problems?: { subjectId: string; conceptId: string; code: string; detail: string }[];
 }
 
 /**
@@ -34,11 +36,36 @@ export default function CurriculumHealthBanner() {
       .catch(() => {/* the banner is a warning, not a dependency */});
   }, [token]);
 
-  if (!health?.degraded) return null;
+  if (!health || (!health.degraded && health.invalidRecords === 0)) return null;
 
   const reasonKey = health.reason === 'database_error'
     ? 'curriculumHealth.databaseError'
     : 'curriculumHealth.databaseEmpty';
+
+  // Records dropped on read are a different failure from a degraded instance:
+  // the published curriculum *is* being served, minus the concepts that could
+  // not be trusted. Students whose progress points at one are stuck.
+  if (!health.degraded) {
+    return (
+      <div
+        className="card"
+        role="status"
+        style={{ gridColumn: '1 / -1', borderLeft: '4px solid var(--warning, #b45309)' }}
+      >
+        <strong style={{ display: 'block', marginBottom: '0.25rem' }}>
+          {t('curriculumHealth.invalidTitle', { count: health.invalidRecords })}
+        </strong>
+        <p style={{ margin: 0, fontSize: '0.875rem' }}>{t('curriculumHealth.invalidBody')}</p>
+        <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.1rem', fontSize: '0.8125rem' }}>
+          {(health.problems ?? []).map(problem => (
+            <li key={`${problem.subjectId}/${problem.conceptId}`}>
+              <code>{problem.conceptId}</code> — {problem.detail}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
 
   return (
     <div

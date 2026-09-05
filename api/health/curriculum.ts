@@ -29,12 +29,20 @@ export async function GET(request: Request) {
       loadedAt: curriculumStatus.loadedAt,
       subjects: curriculumStatus.subjects,
       concepts: curriculumStatus.concepts,
+      // A concept stored but unusable is missing from the graph: a student
+      // whose progress points at it has nowhere to go.
+      invalidRecords: curriculumStatus.invalidRecords.length,
+      ...(isStaff && curriculumStatus.invalidRecords.length > 0
+        ? { problems: curriculumStatus.invalidRecords }
+        : {}),
       // The underlying error names infrastructure. Staff are the ones who can
       // act on it; a student has no use for it and no business seeing it.
       ...(isStaff && curriculumStatus.error ? { error: curriculumStatus.error } : {}),
     },
     // A degraded instance answering 200 is how this went unnoticed in the
-    // first place. 503 is what a monitor is already watching for.
+    // first place. 503 is what a monitor is already watching for. Dropped
+    // records are not an outage — the published curriculum is being served —
+    // so they are reported without failing the check.
     { status: curriculumStatus.degraded ? 503 : 200 }
   );
 }
