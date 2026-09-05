@@ -5,26 +5,40 @@ const client = createClient({
   authToken: process.env.TURSO_AUTH_TOKEN,
 });
 
+/**
+ * Rewrites $1, $2, ... placeholders to libsql's `?` and binds each to the
+ * parameter its own number names — not to the order placeholders happen to
+ * appear in the SQL text. A placeholder used twice (e.g. $1 in two clauses)
+ * must bind the same value both times, and one out of order (e.g. $2 written
+ * before $1) must not shift every later argument by one slot.
+ */
+function bindSqlParams(sql: string, params?: unknown[]): { sql: string; args: unknown[] } {
+  if (!params) return { sql, args: [] };
+
+  const args: unknown[] = [];
+  const processedSql = sql.replace(/\$(\d+)/g, (_match, capturedNumber: string) => {
+    const index = Number(capturedNumber) - 1;
+    if (index < 0 || index >= params.length) {
+      throw new Error(
+        `Missing SQL parameter $${capturedNumber}: only ${params.length} argument(s) provided`
+      );
+    }
+    args.push(params[index]);
+    return '?';
+  });
+
+  return { sql: processedSql, args };
+}
+
 export async function executeSql<T = Record<string, unknown>>(
   sql: string,
   params?: unknown[]
 ): Promise<{ rows: T[]; rowCount: number }> {
-  // Replace $1, $2, etc. with ? for libsql
-  let processedSql = sql;
-  const processedParams: unknown[] = [];
-
-  if (params) {
-    let paramIndex = 0;
-    processedSql = sql.replace(/\$(\d+)/g, () => {
-      processedParams.push(params[paramIndex]);
-      paramIndex++;
-      return '?';
-    });
-  }
+  const { sql: processedSql, args } = bindSqlParams(sql, params);
 
   const result = await client.execute({
     sql: processedSql,
-    args: processedParams as any[],
+    args: args as any[],
   });
 
   return {
@@ -81,18 +95,8 @@ export interface SqlStatement {
 }
 
 function toLibsqlStatement({ sql, params }: SqlStatement) {
-  // Same $N handling as executeSql: placeholders bind by order of appearance.
-  const args: unknown[] = [];
-  let index = 0;
-  const processed = params
-    ? sql.replace(/\$(\d+)/g, () => {
-        args.push(params[index]);
-        index++;
-        return '?';
-      })
-    : sql;
-
-  return { sql: processed, args: args as any[] };
+  const { sql: processedSql, args } = bindSqlParams(sql, params);
+  return { sql: processedSql, args: args as any[] };
 }
 
 /**

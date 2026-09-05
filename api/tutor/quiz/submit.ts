@@ -233,13 +233,21 @@ export async function POST(request: Request) {
     ];
 
     if (hasProgress) {
-      writes.push({
-        sql: `UPDATE progress SET mastery_score = $1, attempts = attempts + 1, last_attempt_at = datetime('now'), mastery_source = 'quiz', mastery_confidence = 1.0${passed ? ", completed_at = datetime('now')" : ''}${schedule ? ", next_review_at = datetime('now', $2), review_interval_days = $3" : ''}
-         WHERE student_id = $4 AND subject = $5 AND concept_id = $6`,
-        params: schedule
-          ? [newScore, schedule.modifier, schedule.intervalDays, auth.userId, subject, conceptId]
-          : [newScore, auth.userId, subject, conceptId],
-      });
+      // The WHERE clause's placeholder numbers depend on how many the SET
+      // clause consumed above them — hardcoding $4/$5/$6 there silently
+      // misbound them (or grabbed the wrong argument) whenever `schedule` was
+      // absent and the params array was four items, not six.
+      const updateParams: unknown[] = [newScore];
+      let updateSql = `UPDATE progress SET mastery_score = $1, attempts = attempts + 1, last_attempt_at = datetime('now'), mastery_source = 'quiz', mastery_confidence = 1.0`;
+      if (passed) updateSql += `, completed_at = datetime('now')`;
+      if (schedule) {
+        updateParams.push(schedule.modifier, schedule.intervalDays);
+        updateSql += `, next_review_at = datetime('now', $${updateParams.length - 1}), review_interval_days = $${updateParams.length}`;
+      }
+      updateParams.push(auth.userId, subject, conceptId);
+      updateSql += ` WHERE student_id = $${updateParams.length - 2} AND subject = $${updateParams.length - 1} AND concept_id = $${updateParams.length}`;
+
+      writes.push({ sql: updateSql, params: updateParams });
     } else {
       writes.push({
         sql: `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at, mastery_source, mastery_confidence${passed ? ', completed_at' : ''}${schedule ? ', next_review_at, review_interval_days' : ''})
