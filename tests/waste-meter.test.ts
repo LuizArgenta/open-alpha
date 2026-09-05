@@ -42,7 +42,7 @@ async function contest(pattern: string) {
 beforeEach(async () => {
   await initializeSchema();
   // Order matters: everything that references users goes first.
-  for (const table of ['xp_awards', 'learning_events', 'focus_contests', 'progress', 'users']) {
+  for (const table of ['assessment_responses', 'assessment_attempts', 'assessment_items', 'learning_decisions', 'xp_awards', 'learning_events', 'focus_contests', 'progress', 'users']) {
     await executeSql(`DELETE FROM ${table}`);
   }
   const created = await executeSql<{ id: number }>(

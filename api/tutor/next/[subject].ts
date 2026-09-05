@@ -1,6 +1,7 @@
 import { executeSql } from '../../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../../_lib/auth.js';
 import { getNextConcept } from '../../_lib/curriculum.js';
+import { recordDecision } from '../../_lib/decisions.js';
 
 interface User {
   grade_level: number | null;
@@ -44,6 +45,26 @@ export async function GET(request: Request) {
       attempts: row.attempts,
     }));
     const nextConcept = getNextConcept(subject, progress, userResult.rows[0].grade_level);
+
+    if (nextConcept) {
+      // Whether the engine moved forward or stepped back is the single most
+      // useful thing an adult can know about this decision.
+      const record = progress.find(p => p.conceptId === nextConcept.id);
+      const steppedBack = !record && progress.length > 0;
+
+      await recordDecision({
+        studentId: auth.userId,
+        subject,
+        conceptId: nextConcept.id,
+        kind: 'next_concept',
+        decision: nextConcept.id,
+        reason: steppedBack ? 'prerequisite_gap' : 'next_in_sequence',
+        inputs: {
+          gradeLevel: userResult.rows[0].grade_level,
+          conceptsWithProgress: progress.length,
+        },
+      });
+    }
 
     return Response.json({ concept: nextConcept || null });
   } catch (error) {
