@@ -6,9 +6,11 @@ import {
   resolveRemediation,
   toProgressMap,
 } from '../../_lib/curriculum.js';
+import { scheduleAfterLapse, scheduleAfterMastery } from '../../_lib/review.js';
 
 interface Progress {
   mastery_score: number;
+  review_interval_days: number | null;
 }
 
 interface SubjectProgressRow {
@@ -55,28 +57,43 @@ export async function POST(request: Request) {
     }
 
     const existingProgress = await executeSql<Progress>(
-      'SELECT mastery_score FROM progress WHERE student_id = $1 AND subject = $2 AND concept_id = $3',
+      'SELECT mastery_score, review_interval_days FROM progress WHERE student_id = $1 AND subject = $2 AND concept_id = $3',
       [auth.userId, subject, conceptId]
     );
 
+    // This attempt, not the all-time best: mastery_score never regresses, so it
+    // is the raw score that tells us whether the concept held up today.
+    const attemptPassed = score >= MASTERY_THRESHOLD;
     let newScore = score;
 
     if (existingProgress.rows.length > 0) {
-      newScore = Math.max(existingProgress.rows[0].mastery_score, score);
+      const existing = existingProgress.rows[0];
+      const wasMastered = existing.mastery_score >= MASTERY_THRESHOLD;
+      newScore = Math.max(existing.mastery_score, score);
       const completed = newScore >= MASTERY_THRESHOLD;
 
-      await executeSql(
-        `UPDATE progress SET mastery_score = $1, attempts = attempts + 1, last_attempt_at = datetime('now')${completed ? ", completed_at = datetime('now')" : ''}
-         WHERE student_id = $2 AND subject = $3 AND concept_id = $4`,
-        [newScore, auth.userId, subject, conceptId]
-      );
-    } else {
-      const completed = score >= MASTERY_THRESHOLD;
+      const schedule = attemptPassed
+        ? scheduleAfterMastery(existing.review_interval_days)
+        : wasMastered
+          ? scheduleAfterLapse()
+          : null;
 
       await executeSql(
-        `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at${completed ? ', completed_at' : ''})
-         VALUES ($1, $2, $3, $4, 1, datetime('now')${completed ? ", datetime('now')" : ''})`,
-        [auth.userId, subject, conceptId, score]
+        `UPDATE progress SET mastery_score = $1, attempts = attempts + 1, last_attempt_at = datetime('now')${completed ? ", completed_at = datetime('now')" : ''}${schedule ? ", next_review_at = datetime('now', $2), review_interval_days = $3" : ''}
+         WHERE student_id = $4 AND subject = $5 AND concept_id = $6`,
+        schedule
+          ? [newScore, schedule.modifier, schedule.intervalDays, auth.userId, subject, conceptId]
+          : [newScore, auth.userId, subject, conceptId]
+      );
+    } else {
+      const schedule = attemptPassed ? scheduleAfterMastery(null) : null;
+
+      await executeSql(
+        `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at${attemptPassed ? ', completed_at' : ''}${schedule ? ', next_review_at, review_interval_days' : ''})
+         VALUES ($1, $2, $3, $4, 1, datetime('now')${attemptPassed ? ", datetime('now')" : ''}${schedule ? ", datetime('now', $5), $6" : ''})`,
+        schedule
+          ? [auth.userId, subject, conceptId, score, schedule.modifier, schedule.intervalDays]
+          : [auth.userId, subject, conceptId, score]
       );
     }
 
