@@ -9,6 +9,7 @@ import { executeSql, initializeSchema } from '../api/_lib/db.js';
 import { signToken } from '../api/_lib/auth.js';
 import { POST as submitQuiz } from '../api/tutor/quiz/submit.js';
 import { recordDecision } from '../api/_lib/decisions.js';
+import { createUser, resetDatabase } from './helpers/database.js';
 
 const SUBJECT = 'math';
 const CONCEPT = 'math-fractions-intro';
@@ -52,20 +53,8 @@ async function submit(body: Record<string, unknown>) {
 }
 
 beforeEach(async () => {
-  await initializeSchema();
-  for (const table of [
-    'assessment_responses', 'assessment_attempts', 'assessment_items',
-    'learning_decisions', 'xp_awards', 'learning_events', 'focus_contests',
-    'progress', 'users',
-  ]) {
-    await executeSql(`DELETE FROM ${table}`);
-  }
-  const created = await executeSql<{ id: number }>(
-    `INSERT INTO users (email, password_hash, role, grade_level)
-     VALUES ($1, 'hash', 'student', 4) RETURNING id`,
-    [`student-${Date.now()}-${Math.random()}@example.test`]
-  );
-  studentId = created.rows[0].id;
+  await resetDatabase();
+  studentId = await createUser('student');
   token = signToken({ userId: studentId, role: 'student' });
 });
 

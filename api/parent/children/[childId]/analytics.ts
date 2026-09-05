@@ -1,26 +1,15 @@
 import { executeSql } from '../../../_lib/db.js';
-import { getAuthFromRequest, unauthorized, forbidden } from '../../../_lib/auth.js';
+import { childIdFromPath, isDenied, requireLinkedChild } from '../../../_lib/guardian.js';
 import { subjects } from '../../../_lib/curriculum.js';
 import { type AlertProgressRow, buildAlerts } from '../../../_lib/alerts.js';
 
 export async function GET(request: Request) {
   try {
-    const auth = getAuthFromRequest(request);
-    if (!auth || auth.role !== 'parent') return unauthorized();
+    const access = await requireLinkedChild(request, childIdFromPath(request));
+    if (isDenied(access)) return access;
+    const childId = access.childId;
 
-    // Extract childId from URL path: /api/parent/children/[childId]/analytics
-    const url = new URL(request.url);
-    const pathParts = url.pathname.split('/');
-    const childIdIndex = pathParts.indexOf('children') + 1;
-    const childId = parseInt(pathParts[childIdIndex], 10);
 
-    const linkResult = await executeSql<{ id: number }>(
-      `SELECT id FROM parent_links
-       WHERE parent_id = $1 AND student_id = $2 AND linked_at IS NOT NULL`,
-      [auth.userId, childId]
-    );
-
-    if (linkResult.rows.length === 0) return forbidden();
 
     const activityResult = await executeSql<{
       session_type: string;

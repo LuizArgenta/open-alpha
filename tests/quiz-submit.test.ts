@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { executeSql, initializeSchema } from '../api/_lib/db.js';
 import { signToken } from '../api/_lib/auth.js';
+import { resetDatabase } from './helpers/database.js';
 import { POST as submitQuiz } from '../api/tutor/quiz/submit.js';
 import { GET as getReviewQueue } from '../api/progress/review.js';
 import { REVIEW_INTERVALS_DAYS } from '../api/_lib/review.js';
@@ -82,11 +83,7 @@ async function logAnswers(
 }
 
 beforeEach(async () => {
-  await initializeSchema();
-  // Order matters: everything that references users goes first.
-  for (const table of ['assessment_responses', 'assessment_attempts', 'assessment_items', 'learning_decisions', 'xp_awards', 'learning_events', 'focus_contests', 'progress', 'users']) {
-    await executeSql(`DELETE FROM ${table}`);
-  }
+  await resetDatabase();
   studentId = await createStudent();
   token = signToken({ userId: studentId, role: 'student' });
 });

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { executeSql, initializeSchema } from '../api/_lib/db.js';
 import { signToken } from '../api/_lib/auth.js';
+import { resetDatabase } from './helpers/database.js';
 import { GET as getTimeback } from '../api/progress/timeback.js';
 import { POST as postContest } from '../api/progress/contest.js';
 
@@ -40,11 +41,7 @@ async function contest(pattern: string) {
 }
 
 beforeEach(async () => {
-  await initializeSchema();
-  // Order matters: everything that references users goes first.
-  for (const table of ['assessment_responses', 'assessment_attempts', 'assessment_items', 'learning_decisions', 'xp_awards', 'learning_events', 'focus_contests', 'progress', 'users']) {
-    await executeSql(`DELETE FROM ${table}`);
-  }
+  await resetDatabase();
   const created = await executeSql<{ id: number }>(
     `INSERT INTO users (email, password_hash, role, grade_level)
      VALUES ($1, 'hash', 'student', 4) RETURNING id`,
