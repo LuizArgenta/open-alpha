@@ -1,13 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../App';
 import Spinner from './Spinner';
 import { useServerText, useTranslation } from '../i18n';
 
 interface Question {
+  itemId?: number;
   question: string;
   options: string[];
   correctAnswer: string;
   explanation: string;
+}
+
+interface AnsweredItem {
+  itemId?: number;
+  chosen: string;
+  correct: boolean;
+  responseTimeMs: number;
 }
 
 interface Remediation {
@@ -45,6 +53,10 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   const [finished, setFinished] = useState(false);
   const [remediation, setRemediation] = useState<Remediation | null>(null);
   const [xp, setXp] = useState<{ amount: number; reason: string } | null>(null);
+  const [attemptId, setAttemptId] = useState<number | null>(null);
+  // Kept in a ref, not state: handleNext reads it in the same tick the last
+  // answer is recorded, and a state update would not have landed yet.
+  const answered = useRef<AnsweredItem[]>([]);
 
   useEffect(() => {
     fetchQuiz();
@@ -72,6 +84,8 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
 
       if (data.questions && data.questions.length > 0) {
         setQuestions(data.questions);
+        setAttemptId(data.attemptId ?? null);
+        answered.current = [];
         // Track quiz start
         fetch('/api/progress/events', {
           method: 'POST',
@@ -105,6 +119,8 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
           score,
           totalQuestions: questions.length,
           correctAnswers: correctCount,
+          attemptId,
+          responses: answered.current,
         }),
       });
 
@@ -135,6 +151,13 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
 
     // Track each answer for waste meter (rapid guess detection)
     const responseTimeMs = Date.now() - questionStartTime;
+
+    answered.current.push({
+      itemId: questions[currentIndex].itemId,
+      chosen: answer,
+      correct,
+      responseTimeMs,
+    });
     fetch('/api/progress/events', {
       method: 'POST',
       headers: {

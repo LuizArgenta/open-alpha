@@ -207,6 +207,57 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Every question a student was actually shown, kept so a mastery decision
+    -- can be reconstructed after the fact
+    CREATE TABLE IF NOT EXISTS assessment_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject_id TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'en',
+      source TEXT NOT NULL CHECK (source IN ('authored', 'generated')),
+      authored_id TEXT,
+      stem TEXT NOT NULL,
+      options TEXT NOT NULL,
+      correct_answer TEXT NOT NULL,
+      explanation TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS assessment_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      subject TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'en',
+      score INTEGER,
+      started_at TEXT DEFAULT (datetime('now')),
+      finished_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS assessment_responses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      attempt_id INTEGER REFERENCES assessment_attempts(id),
+      item_id INTEGER REFERENCES assessment_items(id),
+      chosen TEXT,
+      correct INTEGER NOT NULL,
+      response_ms INTEGER,
+      answered_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- What the engine decided about a student, and on what grounds
+    CREATE TABLE IF NOT EXISTS learning_decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      subject TEXT,
+      concept_id TEXT,
+      kind TEXT NOT NULL,
+      decision TEXT,
+      reason TEXT NOT NULL,
+      inputs TEXT DEFAULT '{}',
+      engine_version INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- XP awarded per mastery attempt (evidence of learning, not time spent)
     CREATE TABLE IF NOT EXISTS xp_awards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,6 +298,50 @@ export async function initializeSchema(): Promise<void> {
     // Spaced review scheduling
     'ALTER TABLE progress ADD COLUMN next_review_at TEXT',
     'ALTER TABLE progress ADD COLUMN review_interval_days INTEGER',
+    `CREATE TABLE IF NOT EXISTS assessment_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject_id TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'en',
+      source TEXT NOT NULL CHECK (source IN ('authored', 'generated')),
+      authored_id TEXT,
+      stem TEXT NOT NULL,
+      options TEXT NOT NULL,
+      correct_answer TEXT NOT NULL,
+      explanation TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS assessment_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      subject TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'en',
+      score INTEGER,
+      started_at TEXT DEFAULT (datetime('now')),
+      finished_at TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS assessment_responses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      attempt_id INTEGER REFERENCES assessment_attempts(id),
+      item_id INTEGER REFERENCES assessment_items(id),
+      chosen TEXT,
+      correct INTEGER NOT NULL,
+      response_ms INTEGER,
+      answered_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS learning_decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      subject TEXT,
+      concept_id TEXT,
+      kind TEXT NOT NULL,
+      decision TEXT,
+      reason TEXT NOT NULL,
+      inputs TEXT DEFAULT '{}',
+      engine_version INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
     `CREATE TABLE IF NOT EXISTS xp_awards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       student_id INTEGER REFERENCES users(id),
