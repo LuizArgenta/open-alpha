@@ -181,7 +181,7 @@ export async function POST(request: Request) {
       scheduleReason = attemptPassed ? 'passed' : 'lapsed';
 
       await executeSql(
-        `UPDATE progress SET mastery_score = $1, attempts = attempts + 1, last_attempt_at = datetime('now')${completed ? ", completed_at = datetime('now')" : ''}${schedule ? ", next_review_at = datetime('now', $2), review_interval_days = $3" : ''}
+        `UPDATE progress SET mastery_score = $1, attempts = attempts + 1, last_attempt_at = datetime('now'), mastery_source = 'quiz', mastery_confidence = 1.0${completed ? ", completed_at = datetime('now')" : ''}${schedule ? ", next_review_at = datetime('now', $2), review_interval_days = $3" : ''}
          WHERE student_id = $4 AND subject = $5 AND concept_id = $6`,
         schedule
           ? [newScore, schedule.modifier, schedule.intervalDays, auth.userId, subject, conceptId]
@@ -192,8 +192,8 @@ export async function POST(request: Request) {
       scheduleReason = 'first_pass';
 
       await executeSql(
-        `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at${attemptPassed ? ', completed_at' : ''}${schedule ? ', next_review_at, review_interval_days' : ''})
-         VALUES ($1, $2, $3, $4, 1, datetime('now')${attemptPassed ? ", datetime('now')" : ''}${schedule ? ", datetime('now', $5), $6" : ''})`,
+        `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at, mastery_source, mastery_confidence${attemptPassed ? ', completed_at' : ''}${schedule ? ', next_review_at, review_interval_days' : ''})
+         VALUES ($1, $2, $3, $4, 1, datetime('now'), 'quiz', 1.0${attemptPassed ? ", datetime('now')" : ''}${schedule ? ", datetime('now', $5), $6" : ''})`,
         schedule
           ? [auth.userId, subject, conceptId, score, schedule.modifier, schedule.intervalDays]
           : [auth.userId, subject, conceptId, score]

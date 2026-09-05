@@ -18,7 +18,8 @@ export type DecisionKind =
   | 'diagnosis'
   | 'review_schedule'
   | 'xp_award'
-  | 'override';
+  | 'override'
+  | 'placement';
 
 export interface DecisionRecord {
   studentId: number;

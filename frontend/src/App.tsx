@@ -12,6 +12,7 @@ import AuthCallback from './pages/AuthCallback';
 import ConceptMap from './pages/ConceptMap';
 import StudentDashboard from './pages/StudentDashboard';
 import Learn from './pages/Learn';
+import Placement from './pages/Placement';
 import ParentDashboard from './pages/ParentDashboard';
 import ParentCoach from './pages/ParentCoach';
 import Settings from './pages/Settings';
@@ -144,6 +145,14 @@ function App() {
             element={
               <ProtectedRoute role="student">
                 <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/placement/:subject"
+            element={
+              <ProtectedRoute role="student">
+                <Placement />
               </ProtectedRoute>
             }
           />

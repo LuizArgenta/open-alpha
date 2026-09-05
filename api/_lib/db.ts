@@ -108,6 +108,8 @@ export async function initializeSchema(): Promise<void> {
       completed_at TEXT,
       next_review_at TEXT,
       review_interval_days INTEGER,
+      mastery_source TEXT DEFAULT 'quiz',
+      mastery_confidence REAL DEFAULT 1.0,
       UNIQUE(student_id, subject, concept_id)
     );
 
@@ -298,6 +300,9 @@ export async function initializeSchema(): Promise<void> {
     // Spaced review scheduling
     'ALTER TABLE progress ADD COLUMN next_review_at TEXT',
     'ALTER TABLE progress ADD COLUMN review_interval_days INTEGER',
+    // How a mastery estimate was arrived at, and how much to trust it
+    "ALTER TABLE progress ADD COLUMN mastery_source TEXT DEFAULT 'quiz'",
+    'ALTER TABLE progress ADD COLUMN mastery_confidence REAL DEFAULT 1.0',
     `CREATE TABLE IF NOT EXISTS assessment_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       subject_id TEXT NOT NULL,
