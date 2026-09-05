@@ -15,7 +15,14 @@
 
 import { executeSql } from '../_lib/db.js';
 import { getSubject, getConcept, type Concept } from '../_lib/curriculum.js';
-import { generateLesson, LESSON_PROMPT_VERSION, type GeneratedLessonContent } from '../_lib/llm.js';
+import {
+  DEFAULT_CONTENT_LANGUAGE,
+  type ContentLanguage,
+  type GeneratedLessonContent,
+  LESSON_PROMPT_VERSION,
+  generateLesson,
+  translateLesson,
+} from '../_lib/llm.js';
 import { validateGeneratedLesson } from '../_lib/lesson-validation.js';
 
 const CORS_HEADERS = {
@@ -35,6 +42,26 @@ function conceptHasFullContent(concept: Concept): boolean {
   return !!(concept.explanation && concept.workedExamples?.length && concept.masteryCheck);
 }
 
+/** The curriculum JSON files are authored in English. */
+const AUTHORED_LANGUAGE: ContentLanguage = 'en';
+
+function parseLanguage(raw: string | null): ContentLanguage {
+  return raw === 'en' || raw === 'pt-BR' ? raw : DEFAULT_CONTENT_LANGUAGE;
+}
+
+function authoredLesson(concept: Concept) {
+  return {
+    objective: concept.objective,
+    explanation: concept.explanation,
+    alternateExplanations: concept.alternateExplanations,
+    workedExamples: concept.workedExamples,
+    guidedPractice: concept.guidedPractice,
+    masteryCheck: concept.masteryCheck,
+    remediationPath: concept.remediationPath,
+    whyItMatters: concept.whyItMatters,
+  };
+}
+
 export async function GET(request: Request) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -44,6 +71,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const subjectId = url.searchParams.get('subject');
     const conceptId = url.searchParams.get('concept');
+    const language = parseLanguage(url.searchParams.get('lang'));
 
     if (!subjectId || !conceptId) {
       return Response.json(
@@ -68,8 +96,8 @@ export async function GET(request: Request) {
       );
     }
 
-    // 1. If the concept has pre-authored content, return it directly
-    if (conceptHasFullContent(concept)) {
+    // 1. Authored content, when the reader's language is the one it was written in
+    if (conceptHasFullContent(concept) && language === AUTHORED_LANGUAGE) {
       return Response.json(
         {
           source: 'authored',
@@ -79,16 +107,8 @@ export async function GET(request: Request) {
             description: concept.description,
             level: concept.gradeLevel,
           },
-          lesson: {
-            objective: concept.objective,
-            explanation: concept.explanation,
-            alternateExplanations: concept.alternateExplanations,
-            workedExamples: concept.workedExamples,
-            guidedPractice: concept.guidedPractice,
-            masteryCheck: concept.masteryCheck,
-            remediationPath: concept.remediationPath,
-            whyItMatters: concept.whyItMatters,
-          },
+          language,
+          lesson: authoredLesson(concept),
         },
         { headers: CORS_HEADERS }
       );
@@ -96,8 +116,9 @@ export async function GET(request: Request) {
 
     // 2. Check for a cached generated lesson in the database
     const cached = await executeSql<CachedLesson>(
-      'SELECT content, generation_model, generation_prompt_version, created_at FROM generated_lessons WHERE subject_id = $1 AND concept_id = $2',
-      [subjectId, conceptId]
+      `SELECT content, generation_model, generation_prompt_version, created_at
+       FROM generated_lessons WHERE subject_id = $1 AND concept_id = $2 AND language = $3`,
+      [subjectId, conceptId, language]
     );
 
     if (cached.rows.length > 0) {
@@ -106,6 +127,7 @@ export async function GET(request: Request) {
       return Response.json(
         {
           source: 'cached',
+          language,
           generatedAt: row.created_at,
           promptVersion: row.generation_prompt_version,
           concept: {
@@ -127,6 +149,11 @@ export async function GET(request: Request) {
     });
 
     const model = 'claude-sonnet-4-6';
+
+    // Authored content in another language is translated rather than rewritten:
+    // the examples and their order were chosen deliberately by a human.
+    const translatingAuthoredContent = conceptHasFullContent(concept);
+
     const generationContext = {
       subjectName: subject.name,
       conceptId: concept.id,
@@ -135,11 +162,18 @@ export async function GET(request: Request) {
       level: concept.gradeLevel,
       prerequisites: prerequisiteNames,
       gradeBand: concept.metadata?.gradeBand,
+      language,
     };
+
+    // Captured out here because attemptGeneration is hoisted, which costs the
+    // narrowing of `concept` inside it.
+    const authoredSource = authoredLesson(concept) as GeneratedLessonContent;
 
     async function attemptGeneration(correctionFeedback?: string) {
       try {
-        const lesson = await generateLesson({ ...generationContext, correctionFeedback }, model);
+        const lesson = translatingAuthoredContent
+          ? await translateLesson(authoredSource, language, model)
+          : await generateLesson({ ...generationContext, correctionFeedback }, model);
         return { lesson, problems: validateGeneratedLesson(lesson).problems };
       } catch (error) {
         // Malformed JSON — usually a truncated response
@@ -176,14 +210,14 @@ export async function GET(request: Request) {
     // lesson indefinitely; serving it uncached lets the next request retry.
     if (passedValidation) {
       await executeSql(
-        `INSERT INTO generated_lessons (subject_id, concept_id, content, generation_model, generation_prompt_version)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT(subject_id, concept_id) DO UPDATE SET
+        `INSERT INTO generated_lessons (subject_id, concept_id, language, content, generation_model, generation_prompt_version)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT(subject_id, concept_id, language) DO UPDATE SET
            content = EXCLUDED.content,
            generation_model = EXCLUDED.generation_model,
            generation_prompt_version = EXCLUDED.generation_prompt_version,
            updated_at = datetime('now')`,
-        [subjectId, conceptId, JSON.stringify(lesson), model, LESSON_PROMPT_VERSION]
+        [subjectId, conceptId, language, JSON.stringify(lesson), model, LESSON_PROMPT_VERSION]
       );
     } else {
       console.warn(
@@ -194,6 +228,7 @@ export async function GET(request: Request) {
     return Response.json(
       {
         source: passedValidation ? 'generated' : 'generated_unvalidated',
+        language,
         generatedAt: new Date().toISOString(),
         promptVersion: LESSON_PROMPT_VERSION,
         concept: {

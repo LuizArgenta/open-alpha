@@ -68,7 +68,7 @@ function trackEvent(
 export default function Learn() {
   const { subject, conceptId } = useParams<{ subject: string; conceptId?: string }>();
   const { token } = useAuth();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const navigate = useNavigate();
 
   const [concepts, setConcepts] = useState<Concept[]>([]);
@@ -162,7 +162,7 @@ export default function Learn() {
       setShowIntro(true);
       setGeneratingLesson(true);
 
-      fetch(`/api/curriculum/lesson?subject=${subject}&concept=${selectedConcept.id}`)
+      fetch(`/api/curriculum/lesson?subject=${subject}&concept=${selectedConcept.id}&lang=${language}`)
         .then(res => res.json())
         .then(data => {
           if (data.lesson) {
@@ -188,7 +188,7 @@ export default function Learn() {
           setGeneratingLesson(false);
         });
     }
-  }, [selectedConcept?.id]);
+  }, [selectedConcept?.id, language]);
 
   const subjectNames: Record<string, string> = {
     math: 'Mathematics',

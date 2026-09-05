@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../App';
+import { useTranslation } from '../i18n';
 import Spinner from '../components/Spinner';
 
 interface Message {
@@ -15,6 +16,7 @@ interface Child {
 }
 
 export default function ParentCoach() {
+  const { language } = useTranslation();
   const { token } = useAuth();
   const [children, setChildren] = useState<Child[]>([]);
   const [selectedChild, setSelectedChild] = useState<Child | null>(null);
@@ -73,6 +75,7 @@ export default function ParentCoach() {
           message: userMessage,
           childId: selectedChild.student_id,
           sessionId: sessionId || undefined,
+          language,
         }),
       });
 

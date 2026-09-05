@@ -1,6 +1,6 @@
 import { executeSql } from '../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
-import { chatWithCoach, ChatMessage, CoachContext } from '../_lib/llm.js';
+import { chatWithCoach, ChatMessage, CoachContext, DEFAULT_CONTENT_LANGUAGE, type ContentLanguage } from '../_lib/llm.js';
 import { subjects } from '../_lib/curriculum.js';
 
 interface Child {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const auth = getAuthFromRequest(request);
     if (!auth || auth.role !== 'parent') return unauthorized();
 
-    const body = await request.json() as { message: string; childId: number; sessionId?: number };
+    const body = await request.json() as { message: string; childId: number; sessionId?: number; language?: ContentLanguage };
     const { message, childId, sessionId } = body;
 
     if (!message || !childId) {
@@ -86,6 +86,7 @@ export async function POST(request: Request) {
     }).join('; ');
 
     const context: CoachContext = {
+      language: body.language ?? DEFAULT_CONTENT_LANGUAGE,
       childGradeLevel: child.grade_level,
       childProgressSummary: progressSummary || 'No progress yet',
     };

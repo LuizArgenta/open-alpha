@@ -1,6 +1,6 @@
 import { executeSql } from '../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
-import { generateQuizQuestions } from '../_lib/llm.js';
+import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage, generateQuizQuestions } from '../_lib/llm.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
 
 interface User {
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const auth = getAuthFromRequest(request);
     if (!auth || auth.role !== 'student') return unauthorized();
 
-    const body = await request.json() as { subject: string; conceptId: string };
+    const body = await request.json() as { subject: string; conceptId: string; language?: ContentLanguage };
     const { subject, conceptId } = body;
 
     if (!subject || !conceptId) {
@@ -62,7 +62,8 @@ export async function POST(request: Request) {
       userResult.rows[0].grade_level,
       5,
       interests,
-      recentAccuracy
+      recentAccuracy,
+      body.language ?? DEFAULT_CONTENT_LANGUAGE
     );
 
     // Extract JSON from markdown code blocks if present

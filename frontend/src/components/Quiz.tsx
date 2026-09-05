@@ -33,7 +33,7 @@ interface QuizProps {
 
 export default function Quiz({ subject, conceptId, conceptName, onComplete, onCancel, onReviewLesson, onRemediate }: QuizProps) {
   const { token } = useAuth();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const serverText = useServerText();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -60,7 +60,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ subject, conceptId }),
+        body: JSON.stringify({ subject, conceptId, language }),
       });
 
       const data = await res.json();

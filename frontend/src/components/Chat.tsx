@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useAuth } from '../App';
+import { useTranslation } from '../i18n';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -13,6 +14,7 @@ interface ChatProps {
 }
 
 export default function Chat({ subject, conceptId, explanationLevel }: ChatProps) {
+  const { language } = useTranslation();
   const { token } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -53,6 +55,7 @@ export default function Chat({ subject, conceptId, explanationLevel }: ChatProps
           conceptId,
           sessionId: sessionId || undefined,
           explanationLevel: explanationLevel || undefined,
+          language,
         }),
       });
 

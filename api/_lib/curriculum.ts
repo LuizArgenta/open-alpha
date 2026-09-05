@@ -368,20 +368,24 @@ interface CachedLessonRow {
  */
 export async function getConceptWithLesson(
   subjectId: string,
-  conceptId: string
+  conceptId: string,
+  language: string = 'en'
 ): Promise<Concept | undefined> {
   const concept = getConcept(subjectId, conceptId);
   if (!concept) return undefined;
 
-  // If the concept already has full content from JSON, return as-is
-  if (concept.explanation && concept.workedExamples?.length && concept.masteryCheck) {
+  // Authored content is written in English; a reader in another language is
+  // better served by a cached translation when one exists.
+  const authoredIsComplete =
+    !!concept.explanation && !!concept.workedExamples?.length && !!concept.masteryCheck;
+  if (authoredIsComplete && language === 'en') {
     return concept;
   }
 
-  // Check for cached generated lesson
+  // Check for cached generated lesson in the requested language
   const cached = await executeSql<CachedLessonRow>(
-    'SELECT content FROM generated_lessons WHERE subject_id = $1 AND concept_id = $2',
-    [subjectId, conceptId]
+    'SELECT content FROM generated_lessons WHERE subject_id = $1 AND concept_id = $2 AND language = $3',
+    [subjectId, conceptId, language]
   );
 
   if (cached.rows.length > 0) {
@@ -399,6 +403,6 @@ export async function getConceptWithLesson(
     };
   }
 
-  // No cached content — return the stub concept
+  // Nothing cached for this language — the authored content, or the stub
   return concept;
 }
