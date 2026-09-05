@@ -11,12 +11,21 @@
  * pure function over events already collected.
  */
 
-/** Same threshold the waste meter uses for a rushed answer. */
-const RAPID_ANSWER_MS = 3000;
 /** A gap this long between two answers means the student left the quiz. */
-const WALKED_AWAY_MS = 5 * 60 * 1000;
+export const WALKED_AWAY_MS = 5 * 60 * 1000;
 const MOSTLY_WRONG = 0.5;
 const MOSTLY_RAPID = 0.5;
+
+/**
+ * How fast is too fast to have read the question. Scaled by the concept's own
+ * difficulty: two seconds is a plausible answer to a counting question and
+ * implausible for an advanced one, so a single threshold mislabels both ends.
+ */
+export function rapidAnswerThresholdMs(difficulty?: string): number {
+  if (difficulty === 'foundational') return 2000;
+  if (difficulty === 'advanced') return 5000;
+  return 3000;
+}
 
 export type ErrorPattern =
   | 'rapid_guessing'
@@ -36,6 +45,8 @@ export interface QuizAttemptSignals {
   answers: AnswerEvent[];
   /** How many times this concept was attempted before this quiz. */
   priorAttempts: number;
+  /** From rapidAnswerThresholdMs() for this concept's difficulty. */
+  rapidThresholdMs: number;
 }
 
 export interface Diagnosis {
@@ -60,13 +71,17 @@ function countLongGaps(answers: AnswerEvent[]): number {
   return gaps;
 }
 
-export function diagnoseAttempt({ answers, priorAttempts }: QuizAttemptSignals): Diagnosis {
+export function diagnoseAttempt({
+  answers,
+  priorAttempts,
+  rapidThresholdMs,
+}: QuizAttemptSignals): Diagnosis {
   if (answers.length === 0) {
     return { pattern: 'inconclusive', isAttention: false };
   }
 
   const rapid = answers.filter(
-    answer => answer.responseTimeMs !== undefined && answer.responseTimeMs < RAPID_ANSWER_MS
+    answer => answer.responseTimeMs !== undefined && answer.responseTimeMs < rapidThresholdMs
   ).length;
   const wrong = answers.filter(answer => !answer.correct).length;
   const wrongRatio = wrong / answers.length;
@@ -75,7 +90,7 @@ export function diagnoseAttempt({ answers, priorAttempts }: QuizAttemptSignals):
     return {
       pattern: 'rapid_guessing',
       isAttention: true,
-      message: `You answered ${rapid} of ${answers.length} questions in under ${RAPID_ANSWER_MS / 1000} seconds. Slow down and read each one — this score doesn't tell us what you actually know yet.`,
+      message: `You answered ${rapid} of ${answers.length} questions in under ${rapidThresholdMs / 1000} seconds. Slow down and read each one — this score doesn't tell us what you actually know yet.`,
     };
   }
 

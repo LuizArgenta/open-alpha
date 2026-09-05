@@ -1,5 +1,15 @@
 import { executeSql } from '../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
+import { getConcept } from '../_lib/curriculum.js';
+import { WALKED_AWAY_MS, rapidAnswerThresholdMs } from '../_lib/diagnosis.js';
+
+interface FocusReason {
+  code: 'rapid_guessing' | 'walked_away' | 'low_accuracy';
+  detail: string;
+  points: number;
+  contestable: boolean;
+  contested: boolean;
+}
 
 interface LearningEvent {
   event_type: string;
@@ -52,10 +62,12 @@ export async function GET(request: Request) {
     let correctAnswers = 0;
     let hintRequests = 0;
     let idleTimeouts = 0;
+    let walkedAwayCount = 0;
     let conceptsStudiedToday = new Set<string>();
 
     let lessonStartTime: string | null = null;
     let quizStartTime: string | null = null;
+    let previousAnswerAt: string | null = null;
 
     for (const event of events) {
       conceptsStudiedToday.add(event.concept_id);
@@ -77,10 +89,26 @@ export async function GET(request: Request) {
           totalAnswers++;
           const payload = JSON.parse(event.payload || '{}');
           if (payload.correct) correctAnswers++;
-          // Detect rapid guessing: answer within 3 seconds of quiz start or previous answer
-          if (payload.responseTimeMs !== undefined && payload.responseTimeMs < 3000) {
+
+          // What counts as rushed depends on the question: a two-second answer
+          // is plausible for counting and not for an advanced concept.
+          const threshold = rapidAnswerThresholdMs(
+            getConcept(event.subject, event.concept_id)?.metadata?.difficulty
+          );
+          if (payload.responseTimeMs !== undefined && payload.responseTimeMs < threshold) {
             rapidGuessCount++;
           }
+
+          // The real "walked away" signal. idle_timeout events are declared in
+          // the schema but no screen emits them, so the gap between consecutive
+          // answers is what actually shows a student leaving mid-quiz.
+          if (
+            previousAnswerAt &&
+            new Date(event.created_at).getTime() - new Date(previousAnswerAt).getTime() >= WALKED_AWAY_MS
+          ) {
+            walkedAwayCount++;
+          }
+          previousAnswerAt = event.created_at;
           break;
         }
         case 'quiz_complete':
@@ -98,22 +126,58 @@ export async function GET(request: Request) {
       }
     }
 
+    // Signals the student has already pushed back on today don't count against
+    // them again — otherwise "contest" would be a button that changes nothing.
+    const contestsResult = await executeSql<{ pattern: string }>(
+      `SELECT pattern FROM focus_contests WHERE student_id = $1 AND created_at >= date('now')`,
+      [auth.userId]
+    );
+    const contested = new Set(contestsResult.rows.map(row => row.pattern));
+
     // Waste score: 0 (perfect focus) to 100 (all waste)
-    // Factors: rapid guessing %, idle timeouts, answer accuracy
-    let wasteScore = 0;
-    if (totalAnswers > 0) {
-      const rapidGuessRatio = rapidGuessCount / totalAnswers;
-      wasteScore += rapidGuessRatio * 50; // Up to 50 points from rapid guessing
+    const reasons: FocusReason[] = [];
+
+    const rapidPoints = totalAnswers > 0
+      ? Math.round((rapidGuessCount / totalAnswers) * 50)
+      : 0;
+    if (rapidGuessCount > 0) {
+      reasons.push({
+        code: 'rapid_guessing',
+        detail: `${rapidGuessCount} of ${totalAnswers} answers came faster than reading the question takes`,
+        points: contested.has('rapid_guessing') ? 0 : rapidPoints,
+        contestable: true,
+        contested: contested.has('rapid_guessing'),
+      });
     }
-    wasteScore += Math.min(idleTimeouts * 10, 30); // Up to 30 points from idle timeouts
-    if (totalAnswers > 0) {
-      const incorrectRatio = 1 - (correctAnswers / totalAnswers);
-      // Only add waste if accuracy is very low (below 40%) — suggests random guessing
-      if (incorrectRatio > 0.6) {
-        wasteScore += 20;
-      }
+
+    const walkedAwayPoints = Math.min(walkedAwayCount * 10, 30);
+    if (walkedAwayCount > 0) {
+      reasons.push({
+        code: 'walked_away',
+        detail: `${walkedAwayCount} long break${walkedAwayCount === 1 ? '' : 's'} in the middle of a quiz`,
+        points: contested.has('walked_away') ? 0 : walkedAwayPoints,
+        contestable: true,
+        contested: contested.has('walked_away'),
+      });
     }
-    wasteScore = Math.min(Math.round(wasteScore), 100);
+
+    // Very low accuracy suggests answering without engaging. Not contestable:
+    // it is a fact about the answers, not a judgement about behaviour.
+    const lowAccuracy = totalAnswers > 0 && 1 - correctAnswers / totalAnswers > 0.6;
+    if (lowAccuracy) {
+      reasons.push({
+        code: 'low_accuracy',
+        detail: `under 40% correct across ${totalAnswers} answers`,
+        points: 20,
+        contestable: false,
+        contested: false,
+      });
+    }
+
+    const wasteScore = Math.min(
+      reasons.reduce((total, reason) => total + reason.points, 0),
+      100
+    );
 
     const focusScore = 100 - wasteScore;
 
@@ -181,6 +245,8 @@ export async function GET(request: Request) {
         focusScore,
         rapidGuessCount,
         idleTimeouts,
+        walkedAwayCount,
+        reasons,
       },
       timeback: {
         dailyProgress,

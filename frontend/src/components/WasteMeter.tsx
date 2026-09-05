@@ -1,11 +1,24 @@
-interface Props {
-  wasteScore: number;
-  focusScore: number;
-  rapidGuessCount: number;
-  idleTimeouts: number;
+export interface FocusReason {
+  code: 'rapid_guessing' | 'walked_away' | 'low_accuracy';
+  detail: string;
+  points: number;
+  contestable: boolean;
+  contested: boolean;
 }
 
-export default function WasteMeter({ focusScore, rapidGuessCount, idleTimeouts }: Props) {
+interface Props {
+  focusScore: number;
+  reasons: FocusReason[];
+  onContest: (code: FocusReason['code']) => void;
+}
+
+const CONTEST_LABELS: Record<FocusReason['code'], string> = {
+  rapid_guessing: "I wasn't guessing",
+  walked_away: 'I was still working',
+  low_accuracy: '',
+};
+
+export default function WasteMeter({ focusScore, reasons, onContest }: Props) {
   // Color gradient from green (focused) to red (waste)
   const getColor = (focus: number) => {
     if (focus >= 80) return 'var(--success)';
@@ -34,32 +47,49 @@ export default function WasteMeter({ focusScore, rapidGuessCount, idleTimeouts }
         }} />
       </div>
 
-      {/* Detail chips */}
-      {(rapidGuessCount > 0 || idleTimeouts > 0) && (
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-          {rapidGuessCount > 0 && (
-            <span style={{
-              fontSize: '0.75rem',
-              padding: '0.125rem 0.5rem',
-              borderRadius: '9999px',
-              background: 'rgba(239,68,68,0.1)',
-              color: 'var(--error)',
-            }}>
-              {rapidGuessCount} rapid guess{rapidGuessCount !== 1 ? 'es' : ''}
-            </span>
-          )}
-          {idleTimeouts > 0 && (
-            <span style={{
-              fontSize: '0.75rem',
-              padding: '0.125rem 0.5rem',
-              borderRadius: '9999px',
-              background: 'rgba(245,158,11,0.1)',
-              color: '#f59e0b',
-            }}>
-              {idleTimeouts} idle timeout{idleTimeouts !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
+      {/* Why the score looks like this, and a way to disagree with it */}
+      {reasons.length > 0 && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: '0.25rem 0 0', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {reasons.map((reason) => (
+            <li
+              key={reason.code}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.5rem',
+                fontSize: '0.75rem',
+                color: 'var(--text-light)',
+                flexWrap: 'wrap',
+              }}
+            >
+              <span style={{ textDecoration: reason.contested ? 'line-through' : 'none' }}>
+                {reason.detail}
+                {reason.points > 0 && ` (−${reason.points})`}
+              </span>
+
+              {reason.contested ? (
+                <span style={{ fontStyle: 'italic', flexShrink: 0 }}>not counted today</span>
+              ) : reason.contestable ? (
+                <button
+                  onClick={() => onContest(reason.code)}
+                  style={{
+                    background: 'none',
+                    border: '1px solid var(--border)',
+                    borderRadius: '9999px',
+                    padding: '0.125rem 0.5rem',
+                    fontSize: '0.7rem',
+                    color: 'var(--primary)',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  {CONTEST_LABELS[reason.code]}
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

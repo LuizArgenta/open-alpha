@@ -167,6 +167,14 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Student pushback on a focus signal ("I wasn't guessing")
+    CREATE TABLE IF NOT EXISTS focus_contests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      pattern TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Guest sessions for demo mode (no account required)
     CREATE TABLE IF NOT EXISTS guest_sessions (
       id TEXT PRIMARY KEY,
@@ -188,6 +196,12 @@ export async function initializeSchema(): Promise<void> {
     // Spaced review scheduling
     'ALTER TABLE progress ADD COLUMN next_review_at TEXT',
     'ALTER TABLE progress ADD COLUMN review_interval_days INTEGER',
+    `CREATE TABLE IF NOT EXISTS focus_contests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      pattern TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
     // Contribution system tables (added after initial launch)
     `CREATE TABLE IF NOT EXISTS contributions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
