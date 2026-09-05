@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # api/ and tests/
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+      # Catches the TS errors that only the frontend's own tsconfig sees;
+      # a Vercel deploy fails on those, so they should fail here first.
+      - name: Build frontend
+        run: npm run build --workspace=frontend
+
+      - name: Validate curriculum graph
+        run: node curriculum/validate.js
