@@ -43,7 +43,8 @@ describe('buildAlerts', () => {
 
     expect(codes(alerts)).toEqual(['stuck']);
     expect(alerts[0].severity).toBe('high');
-    expect(alerts[0].detail).toContain('4 attempts');
+    expect(alerts[0].detailKey).toBe('alert.stuck.detail');
+    expect(alerts[0].detailParams).toMatchObject({ attempts: 4, score: 40 });
     expect(alerts[0].conceptName).toBe('Decimals');
   });
 
@@ -76,8 +77,10 @@ describe('buildAlerts', () => {
     );
 
     const overdue = alerts.find(alert => alert.code === 'reviews_overdue');
-    expect(overdue?.title).toContain('3 concepts');
-    expect(overdue?.detail).toContain('Place Value');
+    // The server picks the plural variant; the client only fills the values.
+    expect(overdue?.titleKey).toBe('alert.reviewsOverdue.title_plural');
+    expect(overdue?.titleParams).toMatchObject({ count: 3 });
+    expect(overdue?.detailParams).toMatchObject({ concept: 'Place Value' });
   });
 
   it('leaves reviews that are not due yet alone', () => {
@@ -94,14 +97,15 @@ describe('buildAlerts', () => {
     const alerts = buildAlerts([row()], '2026-08-26 10:00:00', NOW);
 
     const inactive = alerts.find(alert => alert.code === 'inactive');
-    expect(inactive?.title).toContain('10 days');
+    expect(inactive?.titleKey).toBe('alert.inactive.title');
+    expect(inactive?.titleParams).toMatchObject({ days: 10 });
   });
 
   it('distinguishes never started from gone quiet', () => {
     const alerts = buildAlerts([], null, NOW);
 
     expect(codes(alerts)).toEqual(['inactive']);
-    expect(alerts[0].title).toBe('No sessions yet');
+    expect(alerts[0].titleKey).toBe('alert.neverStarted.title');
   });
 
   it('puts the most severe alert first', () => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../App';
 import WasteMeter, { type FocusReason } from './WasteMeter';
+import { useTranslation } from '../i18n';
 
 interface TimebackData {
   today: {
@@ -32,6 +33,7 @@ interface TimebackData {
 
 export default function TimebackDashboard() {
   const { token } = useAuth();
+  const { t } = useTranslation();
   const [data, setData] = useState<TimebackData | null>(null);
 
   const load = useCallback(async () => {
@@ -78,7 +80,7 @@ export default function TimebackDashboard() {
       <div className="card" style={{ padding: '1.25rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
           <h3 style={{ fontWeight: 600, fontSize: '1.125rem' }}>
-            {isDone ? 'You earned your time back!' : 'Earn Your Time Back'}
+            {isDone ? t('timeback.earnedTitle') : t('timeback.earnTitle')}
           </h3>
           <span style={{
             fontSize: '0.8125rem',
@@ -106,11 +108,13 @@ export default function TimebackDashboard() {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', color: 'var(--text-light)' }}>
-          <span>{today.totalActiveMinutes} min focused today</span>
+          <span>{t('timeback.minutesFocused', { minutes: today.totalActiveMinutes })}</span>
           <span>
             {isDone
-              ? `${timeback.timebackMinutes} min earned back`
-              : `${timeback.targetMinutes - timeback.effectiveMinutes} min remaining`}
+              ? t('timeback.minutesEarned', { minutes: timeback.timebackMinutes })
+              : t('timeback.minutesRemaining', {
+                  minutes: timeback.targetMinutes - timeback.effectiveMinutes,
+                })}
           </span>
         </div>
 
@@ -121,7 +125,7 @@ export default function TimebackDashboard() {
             color: 'var(--success)',
             fontWeight: 500,
           }}>
-            1.25x focus bonus active — finishing faster!
+            {t('timeback.focusBonus')}
           </div>
         )}
       </div>
@@ -139,17 +143,17 @@ export default function TimebackDashboard() {
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
         <div className="card" style={{ padding: '0.875rem 1rem', flex: '1 1 120px', textAlign: 'center' }}>
           <div style={{ fontSize: '1.5rem', fontWeight: 700, lineHeight: 1 }}>{today.conceptsStudied}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-light)', marginTop: '0.25rem' }}>concepts today</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-light)', marginTop: '0.25rem' }}>{t('timeback.conceptsToday')}</div>
         </div>
         <div className="card" style={{ padding: '0.875rem 1rem', flex: '1 1 120px', textAlign: 'center' }}>
           <div style={{ fontSize: '1.5rem', fontWeight: 700, lineHeight: 1 }}>
             {today.totalAnswers > 0 ? Math.round((today.correctAnswers / today.totalAnswers) * 100) : 0}%
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-light)', marginTop: '0.25rem' }}>accuracy</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-light)', marginTop: '0.25rem' }}>{t('timeback.accuracy')}</div>
         </div>
         <div className="card" style={{ padding: '0.875rem 1rem', flex: '1 1 120px', textAlign: 'center' }}>
           <div style={{ fontSize: '1.5rem', fontWeight: 700, lineHeight: 1 }}>{today.hintRequests}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-light)', marginTop: '0.25rem' }}>hints used</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-light)', marginTop: '0.25rem' }}>{t('timeback.hintsUsed')}</div>
         </div>
       </div>
     </div>

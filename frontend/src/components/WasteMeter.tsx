@@ -1,6 +1,9 @@
+import { useServerText, useTranslation } from '../i18n';
+
 export interface FocusReason {
   code: 'rapid_guessing' | 'walked_away' | 'low_accuracy';
-  detail: string;
+  detailKey: string;
+  detailParams: Record<string, string | number>;
   points: number;
   contestable: boolean;
   contested: boolean;
@@ -12,13 +15,16 @@ interface Props {
   onContest: (code: FocusReason['code']) => void;
 }
 
-const CONTEST_LABELS: Record<FocusReason['code'], string> = {
-  rapid_guessing: "I wasn't guessing",
-  walked_away: 'I was still working',
+const CONTEST_LABEL_KEYS = {
+  rapid_guessing: 'focus.contest.rapidGuessing',
+  walked_away: 'focus.contest.walkedAway',
   low_accuracy: '',
-};
+} as const;
 
 export default function WasteMeter({ focusScore, reasons, onContest }: Props) {
+  const { t } = useTranslation();
+  const serverText = useServerText();
+
   // Color gradient from green (focused) to red (waste)
   const getColor = (focus: number) => {
     if (focus >= 80) return 'var(--success)';
@@ -27,12 +33,15 @@ export default function WasteMeter({ focusScore, reasons, onContest }: Props) {
   };
 
   const color = getColor(focusScore);
-  const label = focusScore >= 80 ? 'Locked In' : focusScore >= 60 ? 'Stay Focused' : 'Too Much Waste';
+  const label =
+    focusScore >= 80 ? t('focus.lockedIn')
+    : focusScore >= 60 ? t('focus.stayFocused')
+    : t('focus.tooMuchWaste');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>Focus Meter</span>
+        <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{t('focus.title')}</span>
         <span style={{ fontSize: '0.8125rem', fontWeight: 600, color }}>{label}</span>
       </div>
 
@@ -64,12 +73,12 @@ export default function WasteMeter({ focusScore, reasons, onContest }: Props) {
               }}
             >
               <span style={{ textDecoration: reason.contested ? 'line-through' : 'none' }}>
-                {reason.detail}
+                {serverText(reason.detailKey, reason.detailParams)}
                 {reason.points > 0 && ` (−${reason.points})`}
               </span>
 
               {reason.contested ? (
-                <span style={{ fontStyle: 'italic', flexShrink: 0 }}>not counted today</span>
+                <span style={{ fontStyle: 'italic', flexShrink: 0 }}>{t('focus.notCountedToday')}</span>
               ) : reason.contestable ? (
                 <button
                   onClick={() => onContest(reason.code)}
@@ -84,7 +93,7 @@ export default function WasteMeter({ focusScore, reasons, onContest }: Props) {
                     flexShrink: 0,
                   }}
                 >
-                  {CONTEST_LABELS[reason.code]}
+                  {t(CONTEST_LABEL_KEYS[reason.code] as Parameters<typeof t>[0])}
                 </button>
               ) : null}
             </li>

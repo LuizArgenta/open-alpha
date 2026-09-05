@@ -168,7 +168,11 @@ export async function POST(request: Request) {
       message: 'Keep practicing to reach 80% mastery.',
       diagnosis: diagnosis.pattern,
       remediation: diagnosis.isAttention
-        ? { action: 'extra_practice', message: diagnosis.message }
+        ? {
+            action: 'extra_practice',
+            messageKey: diagnosis.messageKey,
+            messageParams: diagnosis.messageParams,
+          }
         : await buildRemediation(auth.userId, subject, conceptId),
     });
   } catch (error) {

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
 import Spinner from '../components/Spinner';
 import ErrorAlert from '../components/ErrorAlert';
+import { useTranslation } from '../i18n';
 import TimebackDashboard from '../components/TimebackDashboard';
 import InterestSetup from '../components/InterestSetup';
 
@@ -42,6 +43,7 @@ interface Gamification {
 
 export default function StudentDashboard() {
   const { user, token } = useAuth();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [summary, setSummary] = useState<SubjectSummary[]>([]);
   const [recentActivity, setRecentActivity] = useState<Activity[]>([]);
@@ -151,15 +153,15 @@ export default function StudentDashboard() {
   };
 
   if (loading) {
-    return <Spinner size="large" text="Loading your progress..." />;
+    return <Spinner size="large" text={t('student.loadingProgress')} />;
   }
 
   if (error) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <ErrorAlert
-          title="Couldn't load your dashboard"
-          message="We had trouble loading your progress. Please try again."
+          title={t('student.loadError.title')}
+          message={t('student.loadError.message')}
           error={error}
           onRetry={fetchData}
         />
@@ -172,7 +174,7 @@ export default function StudentDashboard() {
       {/* Main Content */}
       <main className="container" style={{ padding: '2rem 1rem' }}>
         <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '1.5rem' }}>
-          Welcome back{user?.displayName ? `, ${user.displayName}` : ''}!
+          {t('student.welcomeBack', { name: user?.displayName ? `, ${user.displayName}` : '' })}
         </h2>
 
         {gamification && (
@@ -252,7 +254,7 @@ export default function StudentDashboard() {
                 cursor: 'pointer',
               }}
             >
-              Edit my interests
+              {t('student.editInterests')}
             </button>
           </div>
         )}
@@ -261,7 +263,7 @@ export default function StudentDashboard() {
         {reviewQueue.length > 0 && (
           <section style={{ marginBottom: '2rem' }}>
             <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span>Due for Review</span>
+              <span>{t('student.dueForReview')}</span>
               <span style={{ fontSize: '0.75rem', fontWeight: 500, padding: '0.125rem 0.5rem', background: 'rgba(79,70,229,0.1)', color: 'var(--primary)', borderRadius: '9999px' }}>
                 {reviewQueue.length}
               </span>
@@ -282,7 +284,7 @@ export default function StudentDashboard() {
                     <span>{subjectEmojis[item.subject]}</span>
                     <span style={{ fontWeight: 500, fontSize: '0.9375rem' }}>{item.conceptName}</span>
                     <span style={{ fontSize: '0.8125rem', color: 'var(--text-light)' }}>
-                      · {item.daysSince}d ago
+                      · {t('student.daysAgo', { days: item.daysSince })}
                     </span>
                   </div>
                   <Link
@@ -290,7 +292,7 @@ export default function StudentDashboard() {
                     className="btn btn-outline"
                     style={{ padding: '0.25rem 0.75rem', fontSize: '0.8125rem' }}
                   >
-                    Review
+                    {t('student.review')}
                   </Link>
                 </div>
               ))}
@@ -300,7 +302,7 @@ export default function StudentDashboard() {
 
         {/* Subject Cards */}
         <section style={{ marginBottom: '3rem' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>Choose a Subject</h3>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>{t('student.chooseSubject')}</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
             {summary.map((subject) => (
               <div

@@ -1,9 +1,13 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../App';
+import { useGradeLabel, useTranslation } from '../i18n';
+import LanguageSwitcher from './LanguageSwitcher';
 
 export default function Header() {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const { t } = useTranslation();
+  const gradeLabel = useGradeLabel();
 
   const isStudent = user?.role === 'student';
   const isParent = user?.role === 'parent';
@@ -11,22 +15,6 @@ export default function Header() {
 
   // Don't show on landing or login pages
   if (!user) return null;
-
-  const gradeLabels: Record<number, string> = {
-    0: 'K',
-    1: '1st',
-    2: '2nd',
-    3: '3rd',
-    4: '4th',
-    5: '5th',
-    6: '6th',
-    7: '7th',
-    8: '8th',
-    9: '9th',
-    10: '10th',
-    11: '11th',
-    12: '12th',
-  };
 
   return (
     <header
@@ -71,11 +59,11 @@ export default function Header() {
             <>
               <NavLink to="/dashboard" current={location.pathname === '/dashboard'}>
                 <span style={{ fontSize: '1.1rem' }}>🏠</span>
-                <span className="hide-mobile">Dashboard</span>
+                <span className="hide-mobile">{t('header.dashboard')}</span>
               </NavLink>
               <NavLink to="/settings" current={location.pathname === '/settings'}>
                 <span style={{ fontSize: '1.1rem' }}>⚙️</span>
-                <span className="hide-mobile">Settings</span>
+                <span className="hide-mobile">{t('header.settings')}</span>
               </NavLink>
             </>
           )}
@@ -84,11 +72,11 @@ export default function Header() {
             <>
               <NavLink to="/parent" current={location.pathname === '/parent'}>
                 <span style={{ fontSize: '1.1rem' }}>🏠</span>
-                <span className="hide-mobile">Dashboard</span>
+                <span className="hide-mobile">{t('header.dashboard')}</span>
               </NavLink>
               <NavLink to="/parent/coach" current={location.pathname === '/parent/coach'}>
                 <span style={{ fontSize: '1.1rem' }}>💬</span>
-                <span className="hide-mobile">Coach</span>
+                <span className="hide-mobile">{t('header.coach')}</span>
               </NavLink>
             </>
           )}
@@ -104,9 +92,10 @@ export default function Header() {
               borderLeft: '1px solid var(--border)',
             }}
           >
+            <LanguageSwitcher compact />
             <span className="hide-mobile" style={{ fontSize: '0.875rem', color: 'var(--text-light)' }}>
               {user?.displayName || user?.email?.split('@')[0]}
-              {isStudent && user?.gradeLevel !== null && ` · ${gradeLabels[user.gradeLevel]}`}
+              {isStudent && user?.gradeLevel !== null && ` · ${gradeLabel(user.gradeLevel)}`}
             </span>
             <button
               onClick={logout}
@@ -121,10 +110,10 @@ export default function Header() {
                 gap: '0.25rem',
                 fontSize: '0.875rem',
               }}
-              title="Sign Out"
+              title={t('header.signOut')}
             >
               <span style={{ fontSize: '1.1rem' }}>🚪</span>
-              <span className="hide-mobile">Sign Out</span>
+              <span className="hide-mobile">{t('header.signOut')}</span>
             </button>
           </div>
         </nav>

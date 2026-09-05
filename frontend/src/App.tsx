@@ -3,6 +3,7 @@ import { useState, useEffect, createContext, useContext, ReactNode } from 'react
 import ErrorBoundary from './components/ErrorBoundary';
 import Spinner from './components/Spinner';
 import Header from './components/Header';
+import { LanguageProvider, useTranslation } from './i18n';
 import Landing from './pages/Landing';
 import Demo from './pages/Demo';
 import Login from './pages/Login';
@@ -92,9 +93,10 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
 function ProtectedRoute({ children, role }: { children: ReactNode; role?: 'student' | 'parent' }) {
   const { user, isLoading } = useAuth();
+  const { t } = useTranslation();
 
   if (isLoading) {
-    return <Spinner size="large" text="Loading..." />;
+    return <Spinner size="large" text={t('common.loading')} />;
   }
 
   if (!user) {
@@ -111,6 +113,7 @@ function ProtectedRoute({ children, role }: { children: ReactNode; role?: 'stude
 function App() {
   return (
     <ErrorBoundary>
+      <LanguageProvider>
       <BrowserRouter>
         <AuthProvider>
           <Header />
@@ -179,6 +182,7 @@ function App() {
           </Routes>
         </AuthProvider>
       </BrowserRouter>
+      </LanguageProvider>
     </ErrorBoundary>
   );
 }

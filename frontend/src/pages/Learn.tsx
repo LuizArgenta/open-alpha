@@ -6,6 +6,7 @@ import Quiz from '../components/Quiz';
 import LessonIntro from '../components/LessonIntro';
 import Spinner from '../components/Spinner';
 import ErrorAlert from '../components/ErrorAlert';
+import { useTranslation } from '../i18n';
 
 interface ConceptExplanation {
   text: string;
@@ -39,9 +40,9 @@ interface Concept {
 }
 
 const TUTOR_LEVELS = [
-  { id: 'eli5' as const,     label: 'ELI5' },
-  { id: 'standard' as const, label: 'Standard' },
-  { id: 'expert' as const,   label: 'Expert' },
+  { id: 'eli5' as const,     labelKey: 'learn.level.eli5' as const },
+  { id: 'standard' as const, labelKey: 'learn.level.standard' as const },
+  { id: 'expert' as const,   labelKey: 'learn.level.expert' as const },
 ];
 type TutorLevel = typeof TUTOR_LEVELS[number]['id'];
 
@@ -67,6 +68,7 @@ function trackEvent(
 export default function Learn() {
   const { subject, conceptId } = useParams<{ subject: string; conceptId?: string }>();
   const { token } = useAuth();
+  const { t } = useTranslation();
   const navigate = useNavigate();
 
   const [concepts, setConcepts] = useState<Concept[]>([]);
@@ -253,14 +255,14 @@ export default function Learn() {
   // Only show the full-page spinner on the very first load (no concepts yet).
   // After concepts are loaded, switching concepts must NOT re-trigger this
   // spinner — it would hide the "Writing your lesson..." generating screen.
-  if (loading && concepts.length === 0) return <Spinner size="large" text="Loading concepts..." />;
+  if (loading && concepts.length === 0) return <Spinner size="large" text={t('learn.loadingConcepts')} />;
 
   if (error) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <ErrorAlert
-          title="Couldn't load concepts"
-          message="We had trouble loading the learning content. Please try again."
+          title={t('learn.loadError.title')}
+          message={t('learn.loadError.message')}
           error={error}
           onRetry={fetchConcepts}
         />
@@ -295,7 +297,7 @@ export default function Learn() {
             onClick={() => setSidebarOpen(true)}
             className="lessons-toggle"
           >
-            ☰ Lessons
+            ☰ {t('learn.lessons')}
           </button>
 
           <nav style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.875rem', minWidth: 0, overflow: 'hidden' }}>
@@ -303,7 +305,7 @@ export default function Learn() {
               to="/dashboard"
               style={{ color: 'var(--text-light)', whiteSpace: 'nowrap', flexShrink: 0 }}
             >
-              Subjects
+              {t('learn.subjects')}
             </Link>
             <span style={{ color: 'var(--border)', flexShrink: 0 }}>›</span>
             <Link
@@ -345,7 +347,7 @@ export default function Learn() {
             className="btn btn-secondary"
             style={{ padding: '0.4rem 0.875rem', fontSize: '0.875rem', flexShrink: 0 }}
           >
-            Take Quiz
+            {t('learn.takeQuiz')}
           </button>
         )}
       </div>
@@ -390,7 +392,7 @@ export default function Learn() {
                 marginBottom: '0.375rem',
               }}
             >
-              ← All Subjects
+              ← {t('learn.allSubjects')}
             </Link>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600, fontSize: '1rem' }}>
               <span>{subjectEmoji}</span>
@@ -449,9 +451,9 @@ export default function Learn() {
                   {selectedConcept?.id === concept.id && (
                     <div style={{ display: 'flex', gap: '0.25rem', padding: '0.25rem 0.75rem 0.375rem calc(0.75rem + 18px + 0.5rem)', flexWrap: 'wrap' }}>
                       {[
-                        { label: '📄 Lesson', action: () => { setShowQuiz(false); setShowIntro(true); setSidebarOpen(false); } },
-                        { label: '💬 Tutor',  action: () => { setShowQuiz(false); setShowIntro(false); setSidebarOpen(false); } },
-                        { label: '🎯 Quiz',   action: () => { setShowQuiz(true); setSidebarOpen(false); } },
+                        { label: `📄 ${t('learn.lesson')}`, action: () => { setShowQuiz(false); setShowIntro(true); setSidebarOpen(false); } },
+                        { label: `💬 ${t('learn.tutor')}`,  action: () => { setShowQuiz(false); setShowIntro(false); setSidebarOpen(false); } },
+                        { label: `🎯 ${t('learn.quiz')}`,   action: () => { setShowQuiz(true); setSidebarOpen(false); } },
                       ].map(({ label, action }) => (
                         <button
                           key={label}
@@ -499,7 +501,7 @@ export default function Learn() {
                   <p style={{ color: 'var(--text-light)', fontSize: '0.875rem' }}>{selectedConcept.description}</p>
                   {selectedConcept.masteryScore > 0 && (
                     <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span style={{ fontSize: '0.875rem', color: 'var(--text-light)' }}>Mastery:</span>
+                      <span style={{ fontSize: '0.875rem', color: 'var(--text-light)' }}>{t('learn.mastery')}</span>
                       <span style={{
                         padding: '0.125rem 0.5rem',
                         borderRadius: '9999px',
@@ -542,7 +544,7 @@ export default function Learn() {
                             textTransform: 'capitalize',
                           }}
                         >
-                          {tab === 'lesson' ? 'Lesson' : 'Tutor'}
+                          {tab === 'lesson' ? t('learn.lesson') : t('learn.tutor')}
                         </button>
                       );
                     })}
@@ -570,10 +572,10 @@ export default function Learn() {
                       </div>
                       <div>
                         <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                          Writing your lesson...
+                          {t('learn.generating.title')}
                         </h3>
                         <p style={{ color: 'var(--text-light)', maxWidth: '400px', lineHeight: 1.6 }}>
-                          Our AI is crafting a personalized lesson on <strong>{selectedConcept.name}</strong>. This takes a few seconds the first time — after that, it's instant for everyone.
+                          {t('learn.generating.body', { concept: selectedConcept.name })}
                         </p>
                       </div>
                       <style>{`@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.05); } }`}</style>
@@ -599,7 +601,7 @@ export default function Learn() {
                         flexWrap: 'wrap',
                         flexShrink: 0,
                       }}>
-                        <span style={{ fontSize: '0.8125rem', color: 'var(--text-light)', whiteSpace: 'nowrap' }}>Explain like I'm:</span>
+                        <span style={{ fontSize: '0.8125rem', color: 'var(--text-light)', whiteSpace: 'nowrap' }}>{t('learn.explainLevel')}</span>
                         {TUTOR_LEVELS.map(level => (
                           <button
                             key={level.id}
@@ -615,7 +617,7 @@ export default function Learn() {
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {level.label}
+                            {t(level.labelKey)}
                           </button>
                         ))}
                       </div>
@@ -627,7 +629,7 @@ export default function Learn() {
             )
           ) : (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <p style={{ color: 'var(--text-light)' }}>Select a lesson from the left to start learning</p>
+              <p style={{ color: 'var(--text-light)' }}>{t('learn.selectLesson')}</p>
             </div>
           )}
 
@@ -642,7 +644,7 @@ export default function Learn() {
               justifyContent: 'space-between',
               flexShrink: 0,
             }}>
-              <span style={{ fontSize: '0.8125rem', color: 'var(--text-light)' }}>Up next</span>
+              <span style={{ fontSize: '0.8125rem', color: 'var(--text-light)' }}>{t('learn.upNext')}</span>
               <button
                 onClick={() => {
                   setSelectedConcept(nextConcept);
@@ -683,7 +685,7 @@ export default function Learn() {
           whiteSpace: 'nowrap',
         }}>
           <span>&#10003;</span>
-          <span>Nice work! Moving on to <strong>{nextConceptBanner.name}</strong>...</span>
+          <span>{t('learn.advanceBanner', { concept: nextConceptBanner.name })}</span>
         </div>
       )}
     </div>

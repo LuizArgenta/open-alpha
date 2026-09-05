@@ -154,7 +154,7 @@ describe('quiz submission', () => {
 
     expect(result.diagnosis).toBe('rapid_guessing');
     expect(result.remediation.conceptId).toBeUndefined();
-    expect(result.remediation.message).toContain('Slow down');
+    expect(result.remediation.messageKey).toBe('diagnosis.rapidGuessing');
   });
 
   it('escalates to a conceptual gap on the second careful failure', async () => {
