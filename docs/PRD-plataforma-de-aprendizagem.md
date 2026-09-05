@@ -81,7 +81,13 @@ Resolver essas duas é o caminho crítico. Quase todo o resto depende de uma del
 ### C1. Currículo no banco, arquivos como semente
 **O quê:** mover o currículo para tabelas (`subjects`, `concepts`, `concept_prerequisites`), com importador que carrega os JSON existentes e mantém o caminho de contribuição por PR.
 **Por quê:** **sem isso não existe autoria.** O FS da Vercel é somente leitura e o currículo é lido no import do módulo.
-**Depende de:** nada. **Esforço:** alto — é a mudança mais invasiva da lista, mexe em todo `_lib/curriculum.ts`. Os 58 testes existentes protegem esse refactor.
+**Depende de:** nada. **Esforço:** alto — é a mudança mais invasiva da lista, mexe em todo `_lib/curriculum.ts`. Os testes existentes protegem esse refactor.
+
+**Decisão de arquitetura (definida ao implementar os blocos A, B e D):** a leitura do currículo **continua síncrona**. `_lib/curriculum.ts` já é a costura por onde todo o resto passa — `getConcept`, `getNextConcept`, geração de lição, quiz, nivelamento — e tornar essa interface assíncrona espalharia `await` por todos os consumidores sem ganho nenhum. O carregamento usa *top-level await* (o projeto é ESM) para popular um cache em memória na inicialização do módulo, exatamente como o carregador de arquivos se comporta hoje: uma vez por instância serverless.
+
+Cada conceito vira **uma linha com um blob JSON** mais colunas indexadas (id, matéria, nível, pré-requisitos), em vez de normalização completa. O conteúdo é aninhado e rico, o grafo tem centenas de conceitos, e ele é carregado inteiro para a memória de qualquer forma — normalizar custaria flexibilidade de schema sem comprar nada.
+
+Os arquivos JSON permanecem como **semente e fallback**: se o banco ainda não tem currículo (instalação nova) ou falha, o carregador cai para os arquivos. Isso evita que uma indisponibilidade do banco derrube a aplicação inteira na carga do módulo.
 
 ### C2. Papéis de administrador e professor
 **O quê:** ampliar os papéis além de `student` e `parent`.
