@@ -2,6 +2,7 @@ import { executeSql } from '../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage, generateQuizQuestions } from '../_lib/llm.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
+import { expireStaleAttempts } from '../_lib/attempts.js';
 
 interface User {
   grade_level: number | null;
@@ -108,6 +109,10 @@ export async function POST(request: Request) {
     if (!subject || !conceptId) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 });
     }
+
+    // Serverless has nowhere to run a sweep, so it rides on the next quiz the
+    // student opens: anything they abandoned is closed before a new one starts.
+    await expireStaleAttempts(auth.userId);
 
     const userResult = await executeSql<User>(
       'SELECT grade_level FROM users WHERE id = $1',

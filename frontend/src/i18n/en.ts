@@ -99,6 +99,9 @@ export const en: Dictionary = {
   'quiz.whatToDoNext': "Here's what to do next",
   'quiz.reviewConcept': 'Review {concept}',
   'quiz.reviewEarlier': 'Review the earlier concept',
+  'quiz.expiredTitle': 'This quiz timed out',
+  'quiz.expiredBody': 'You started it a while ago, so we closed it. Start a fresh one — your answers so far were saved, but they do not count towards mastery.',
+  'quiz.expiredRestart': 'Start a new quiz',
   'quiz.backToLearning': 'Back to learning',
   'quiz.continueLearning': 'Continue learning',
 

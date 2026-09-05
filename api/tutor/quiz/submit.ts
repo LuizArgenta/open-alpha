@@ -1,4 +1,4 @@
-import { executeSql } from '../../_lib/db.js';
+import { type SqlStatement, executeSql, executeTransaction } from '../../_lib/db.js';
 import { forbidden, getAuthFromRequest, unauthorized } from '../../_lib/auth.js';
 import {
   MASTERY_THRESHOLD,
@@ -15,13 +15,16 @@ import {
   rapidAnswerThresholdMs,
 } from '../../_lib/diagnosis.js';
 import { awardXp } from '../../_lib/xp.js';
-import { recordDecision } from '../../_lib/decisions.js';
+import { decisionStatement } from '../../_lib/decisions.js';
+import { ATTEMPT_DEADLINE_MODIFIER, attemptExpired, expireAttempt } from '../../_lib/attempts.js';
 
 interface AttemptRow {
   student_id: number;
   subject: string;
   concept_id: string;
   finished_at: string | null;
+  expired_at: string | null;
+  stale: number;
 }
 
 /**
@@ -130,8 +133,10 @@ export async function POST(request: Request) {
     const attemptId = body.attemptId as number;
 
     const attemptRow = await executeSql<AttemptRow>(
-      'SELECT student_id, subject, concept_id, finished_at FROM assessment_attempts WHERE id = $1',
-      [attemptId]
+      `SELECT student_id, subject, concept_id, finished_at, expired_at,
+              started_at < datetime('now', $1) as stale
+       FROM assessment_attempts WHERE id = $2`,
+      [ATTEMPT_DEADLINE_MODIFIER, attemptId]
     );
     if (attemptRow.rows.length === 0) {
       return Response.json({ error: 'Attempt not found' }, { status: 404 });
@@ -140,9 +145,19 @@ export async function POST(request: Request) {
     const attempt = attemptRow.rows[0];
     if (attempt.student_id !== auth.userId) return forbidden();
 
+    if (attempt.expired_at !== null) return attemptExpired();
+
     // Finishing twice would award XP twice and re-run the schedule.
     if (attempt.finished_at !== null) {
       return Response.json({ error: 'Attempt already finished' }, { status: 409 });
+    }
+
+    // A quiz opened hours ago and submitted now says nothing about whether the
+    // student can do this today, which is what mastery claims. Expired rather
+    // than graded: the answers stay as evidence, the decision is not made.
+    if (Number(attempt.stale) === 1) {
+      await expireAttempt(attemptId);
+      return attemptExpired();
     }
 
     const subject = attempt.subject;
@@ -156,64 +171,29 @@ export async function POST(request: Request) {
 
     const priorAttempts = existingProgress.rows[0]?.attempts ?? 0;
 
-    await executeSql(
-      `UPDATE assessment_attempts SET score = $1, finished_at = datetime('now') WHERE id = $2`,
-      [score, attemptId]
-    );
-
-    // This attempt, not the all-time best: mastery_score never regresses, so it
-    // is the raw score that tells us whether the concept held up today.
+    // Everything below is decided from reads before anything is written, so the
+    // writes can go in as one unit. Split writes used to be able to leave XP
+    // awarded with no progress recorded, or an attempt closed with no mastery.
     const attemptPassed = score >= MASTERY_THRESHOLD;
-    let newScore = score;
-    let schedule: ReviewSchedule | null = null;
-    let scheduleReason = '';
+    const hasProgress = existingProgress.rows.length > 0;
+    const existing = existingProgress.rows[0];
+    const wasMastered = hasProgress && existing.mastery_score >= MASTERY_THRESHOLD;
 
-    if (existingProgress.rows.length > 0) {
-      const existing = existingProgress.rows[0];
-      const wasMastered = existing.mastery_score >= MASTERY_THRESHOLD;
-      newScore = Math.max(existing.mastery_score, score);
-      const completed = newScore >= MASTERY_THRESHOLD;
+    // Mastery never regresses, so it is this attempt's raw score — not the
+    // all-time best — that says whether the concept held up today.
+    const newScore = hasProgress ? Math.max(existing.mastery_score, score) : score;
+    const passed = newScore >= MASTERY_THRESHOLD;
 
-      schedule = attemptPassed
+    const schedule: ReviewSchedule | null = hasProgress
+      ? attemptPassed
         ? scheduleAfterMastery(existing.review_interval_days)
         : wasMastered
           ? scheduleAfterLapse()
-          : null;
-      scheduleReason = attemptPassed ? 'passed' : 'lapsed';
-
-      await executeSql(
-        `UPDATE progress SET mastery_score = $1, attempts = attempts + 1, last_attempt_at = datetime('now'), mastery_source = 'quiz', mastery_confidence = 1.0${completed ? ", completed_at = datetime('now')" : ''}${schedule ? ", next_review_at = datetime('now', $2), review_interval_days = $3" : ''}
-         WHERE student_id = $4 AND subject = $5 AND concept_id = $6`,
-        schedule
-          ? [newScore, schedule.modifier, schedule.intervalDays, auth.userId, subject, conceptId]
-          : [newScore, auth.userId, subject, conceptId]
-      );
-    } else {
-      schedule = attemptPassed ? scheduleAfterMastery(null) : null;
-      scheduleReason = 'first_pass';
-
-      await executeSql(
-        `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at, mastery_source, mastery_confidence${attemptPassed ? ', completed_at' : ''}${schedule ? ', next_review_at, review_interval_days' : ''})
-         VALUES ($1, $2, $3, $4, 1, datetime('now'), 'quiz', 1.0${attemptPassed ? ", datetime('now')" : ''}${schedule ? ", datetime('now', $5), $6" : ''})`,
-        schedule
-          ? [auth.userId, subject, conceptId, score, schedule.modifier, schedule.intervalDays]
-          : [auth.userId, subject, conceptId, score]
-      );
-    }
-
-    if (schedule) {
-      await recordDecision({
-        studentId: auth.userId,
-        subject,
-        conceptId,
-        kind: 'review_schedule',
-        decision: `+${schedule.intervalDays}d`,
-        reason: scheduleReason,
-        inputs: { score, priorAttempts },
-      });
-    }
-
-    const passed = newScore >= MASTERY_THRESHOLD;
+          : null
+      : attemptPassed
+        ? scheduleAfterMastery(null)
+        : null;
+    const scheduleReason = hasProgress ? (attemptPassed ? 'passed' : 'lapsed') : 'first_pass';
 
     // Read once: both the diagnosis and the XP award are about the quality of
     // this attempt, not of the day.
@@ -231,32 +211,109 @@ export async function POST(request: Request) {
       gamed: diagnosis.pattern === 'rapid_guessing',
     });
 
-    await recordDecision({
-      studentId: auth.userId,
-      subject,
-      conceptId,
-      kind: 'diagnosis',
-      decision: diagnosis.pattern,
-      reason: passed ? 'passed' : 'failed',
-      inputs: { score, answers: answers.length, rapidThresholdMs },
-    });
+    // Why they failed decides what to offer: a student who rushed or walked
+    // away hasn't shown a knowledge gap, so sending them to a prerequisite
+    // would be answering the wrong question. Resolved before the write because
+    // it reads the prerequisites' progress, which this attempt does not touch.
+    const remediation = passed
+      ? undefined
+      : diagnosis.isAttention
+        ? {
+            action: 'extra_practice' as const,
+            messageKey: diagnosis.messageKey,
+            messageParams: diagnosis.messageParams,
+          }
+        : await buildRemediation(auth.userId, subject, conceptId);
 
-    await recordDecision({
-      studentId: auth.userId,
-      subject,
-      conceptId,
-      kind: 'xp_award',
-      decision: String(xp.amount),
-      reason: xp.reason,
-      inputs: { score, estimatedMinutes: concept?.metadata?.estimatedMinutes },
-    });
+    const writes: SqlStatement[] = [
+      {
+        sql: `UPDATE assessment_attempts SET score = $1, finished_at = datetime('now') WHERE id = $2`,
+        params: [score, attemptId],
+      },
+    ];
+
+    if (hasProgress) {
+      writes.push({
+        sql: `UPDATE progress SET mastery_score = $1, attempts = attempts + 1, last_attempt_at = datetime('now'), mastery_source = 'quiz', mastery_confidence = 1.0${passed ? ", completed_at = datetime('now')" : ''}${schedule ? ", next_review_at = datetime('now', $2), review_interval_days = $3" : ''}
+         WHERE student_id = $4 AND subject = $5 AND concept_id = $6`,
+        params: schedule
+          ? [newScore, schedule.modifier, schedule.intervalDays, auth.userId, subject, conceptId]
+          : [newScore, auth.userId, subject, conceptId],
+      });
+    } else {
+      writes.push({
+        sql: `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at, mastery_source, mastery_confidence${passed ? ', completed_at' : ''}${schedule ? ', next_review_at, review_interval_days' : ''})
+         VALUES ($1, $2, $3, $4, 1, datetime('now'), 'quiz', 1.0${passed ? ", datetime('now')" : ''}${schedule ? ", datetime('now', $5), $6" : ''})`,
+        params: schedule
+          ? [auth.userId, subject, conceptId, score, schedule.modifier, schedule.intervalDays]
+          : [auth.userId, subject, conceptId, score],
+      });
+    }
 
     if (xp.amount !== 0) {
-      await executeSql(
-        'INSERT INTO xp_awards (student_id, subject, concept_id, amount, reason) VALUES ($1, $2, $3, $4, $5)',
-        [auth.userId, subject, conceptId, xp.amount, xp.reason]
+      writes.push({
+        sql: 'INSERT INTO xp_awards (student_id, subject, concept_id, amount, reason) VALUES ($1, $2, $3, $4, $5)',
+        params: [auth.userId, subject, conceptId, xp.amount, xp.reason],
+      });
+    }
+
+    // The decisions ride along in the same transaction rather than being
+    // logged best-effort afterwards: they are the grounds for the rows above,
+    // and a parent contesting a remediation is owed the record of it. A write
+    // that lands without its justification is worse than one that fails.
+    if (schedule) {
+      writes.push(
+        decisionStatement({
+          studentId: auth.userId,
+          subject,
+          conceptId,
+          kind: 'review_schedule',
+          decision: `+${schedule.intervalDays}d`,
+          reason: scheduleReason,
+          inputs: { score, priorAttempts },
+        })
       );
     }
+
+    writes.push(
+      decisionStatement({
+        studentId: auth.userId,
+        subject,
+        conceptId,
+        kind: 'diagnosis',
+        decision: diagnosis.pattern,
+        reason: passed ? 'passed' : 'failed',
+        inputs: { score, answers: answers.length, rapidThresholdMs },
+      })
+    );
+
+    writes.push(
+      decisionStatement({
+        studentId: auth.userId,
+        subject,
+        conceptId,
+        kind: 'xp_award',
+        decision: String(xp.amount),
+        reason: xp.reason,
+        inputs: { score, estimatedMinutes: concept?.metadata?.estimatedMinutes },
+      })
+    );
+
+    if (!passed) {
+      writes.push(
+        decisionStatement({
+          studentId: auth.userId,
+          subject,
+          conceptId,
+          kind: 'remediation',
+          decision: remediation?.conceptId ?? remediation?.action ?? 'none',
+          reason: diagnosis.pattern,
+          inputs: { score, priorAttempts },
+        })
+      );
+    }
+
+    await executeTransaction(writes);
 
     if (passed) {
       return Response.json({
@@ -266,27 +323,6 @@ export async function POST(request: Request) {
         xp,
       });
     }
-
-    // Why they failed decides what to offer: a student who rushed or walked
-    // away hasn't shown a knowledge gap, so sending them to a prerequisite
-    // would be answering the wrong question.
-    const remediation = diagnosis.isAttention
-      ? {
-          action: 'extra_practice' as const,
-          messageKey: diagnosis.messageKey,
-          messageParams: diagnosis.messageParams,
-        }
-      : await buildRemediation(auth.userId, subject, conceptId);
-
-    await recordDecision({
-      studentId: auth.userId,
-      subject,
-      conceptId,
-      kind: 'remediation',
-      decision: remediation?.conceptId ?? remediation?.action ?? 'none',
-      reason: diagnosis.pattern,
-      inputs: { score, priorAttempts },
-    });
 
     return Response.json({
       masteryScore: newScore,

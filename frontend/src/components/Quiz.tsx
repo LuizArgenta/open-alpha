@@ -55,6 +55,9 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   const [grading, setGrading] = useState(false);
   const [attemptId, setAttemptId] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
+  // A quiz left open for hours is closed by the server. Saying so is better
+  // than a screen that silently stops responding.
+  const [expired, setExpired] = useState(false);
 
   useEffect(() => {
     fetchQuiz();
@@ -115,6 +118,11 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
         body: JSON.stringify({ attemptId }),
       });
 
+      if (res.status === 410) {
+        setExpired(true);
+        return;
+      }
+
       const data = await res.json();
       if (data.masteryScore !== undefined) setServerScore(data.masteryScore);
       if (data.remediation) setRemediation(data.remediation);
@@ -155,6 +163,11 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
         }),
       });
 
+      if (res.status === 410) {
+        setExpired(true);
+        return;
+      }
+
       if (!res.ok) throw new Error('grading failed');
 
       const result = await res.json() as Verdict;
@@ -167,6 +180,22 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
     } finally {
       setGrading(false);
     }
+  }
+
+  /** Everything about the old attempt is gone; start a clean one. */
+  function restart() {
+    setExpired(false);
+    setFinished(false);
+    setQuestions([]);
+    setCurrentIndex(0);
+    setSelectedAnswer(null);
+    setShowExplanation(false);
+    setVerdict(null);
+    setCorrectCount(0);
+    setRemediation(null);
+    setXp(null);
+    setServerScore(null);
+    fetchQuiz();
   }
 
   function handleNext() {
@@ -201,6 +230,21 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
             <button onClick={onCancel} className="btn btn-outline">
               {t('common.goBack')}
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (expired) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+        <div className="card" style={{ textAlign: 'center', maxWidth: '420px' }}>
+          <h2 style={{ marginBottom: '0.75rem' }}>{t('quiz.expiredTitle')}</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>{t('quiz.expiredBody')}</p>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+            <button onClick={restart} className="btn btn-primary">{t('quiz.expiredRestart')}</button>
+            <button onClick={onCancel} className="btn btn-secondary">{t('quiz.backToLearning')}</button>
           </div>
         </div>
       </div>

@@ -16,10 +16,13 @@
 
 import { executeSql } from '../../_lib/db.js';
 import { getAuthFromRequest, forbidden, unauthorized } from '../../_lib/auth.js';
+import { ATTEMPT_DEADLINE_MODIFIER, attemptExpired, expireAttempt } from '../../_lib/attempts.js';
 
 interface AttemptRow {
   student_id: number;
   finished_at: string | null;
+  expired_at: string | null;
+  stale: number;
 }
 
 interface ItemRow {
@@ -50,8 +53,10 @@ export async function POST(request: Request) {
     }
 
     const attempt = await executeSql<AttemptRow>(
-      'SELECT student_id, finished_at FROM assessment_attempts WHERE id = $1',
-      [attemptId]
+      `SELECT student_id, finished_at, expired_at,
+              started_at < datetime('now', $1) as stale
+       FROM assessment_attempts WHERE id = $2`,
+      [ATTEMPT_DEADLINE_MODIFIER, attemptId]
     );
     if (attempt.rows.length === 0) {
       return Response.json({ error: 'Attempt not found' }, { status: 404 });
@@ -60,8 +65,17 @@ export async function POST(request: Request) {
     // Someone else's attempt is not yours to answer.
     if (attempt.rows[0].student_id !== auth.userId) return forbidden();
 
+    if (attempt.rows[0].expired_at !== null) return attemptExpired();
+
     if (attempt.rows[0].finished_at !== null) {
       return Response.json({ error: 'Attempt already finished' }, { status: 409 });
+    }
+
+    // Answering a quiz opened hours ago is not the same activity the pace
+    // signals and the mastery decision assume it is.
+    if (Number(attempt.rows[0].stale) === 1) {
+      await expireAttempt(attemptId as number);
+      return attemptExpired();
     }
 
     // The item has to be part of this attempt, not merely a real item.

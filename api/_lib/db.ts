@@ -72,6 +72,54 @@ async function migrateGeneratedLessonsToPerLanguage(): Promise<void> {
   `);
 }
 
+/**
+ * A statement queued inside a transaction, in the same shape executeSql takes.
+ */
+export interface SqlStatement {
+  sql: string;
+  params?: unknown[];
+}
+
+function toLibsqlStatement({ sql, params }: SqlStatement) {
+  // Same $N handling as executeSql: placeholders bind by order of appearance.
+  const args: unknown[] = [];
+  let index = 0;
+  const processed = params
+    ? sql.replace(/\$(\d+)/g, () => {
+        args.push(params[index]);
+        index++;
+        return '?';
+      })
+    : sql;
+
+  return { sql: processed, args: args as any[] };
+}
+
+/**
+ * Runs statements as one unit, so a failure halfway cannot leave a student
+ * with XP awarded and no progress recorded, or an attempt closed with no
+ * mastery written.
+ *
+ * Deliberately takes a prepared list rather than a callback: everything that
+ * needs to be atomic here is known before the first write, and a callback
+ * would invite reads inside the transaction that libsql would serialise
+ * behind the write lock.
+ */
+export async function executeTransaction(statements: SqlStatement[]): Promise<void> {
+  if (statements.length === 0) return;
+
+  const transaction = await client.transaction('write');
+  try {
+    for (const statement of statements) {
+      await transaction.execute(toLibsqlStatement(statement));
+    }
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
 export async function initializeSchema(): Promise<void> {
   await client.executeMultiple(`
     -- Users (students and parents)
@@ -274,7 +322,10 @@ export async function initializeSchema(): Promise<void> {
       language TEXT NOT NULL DEFAULT 'en',
       score INTEGER,
       started_at TEXT DEFAULT (datetime('now')),
-      finished_at TEXT
+      finished_at TEXT,
+      -- Set when the attempt timed out rather than being submitted, so a
+      -- closed attempt with no score is never ambiguous.
+      expired_at TEXT
     );
 
     -- Which items an attempt is made of, and in what order. Without this the
@@ -349,6 +400,8 @@ export async function initializeSchema(): Promise<void> {
   const migrations = [
     'ALTER TABLE users ADD COLUMN atxp_account_id TEXT',
     'ALTER TABLE users ADD COLUMN atxp_connection_token TEXT',
+    // Attempts that timed out instead of being submitted
+    'ALTER TABLE assessment_attempts ADD COLUMN expired_at TEXT',
     // Spaced review scheduling
     'ALTER TABLE progress ADD COLUMN next_review_at TEXT',
     'ALTER TABLE progress ADD COLUMN review_interval_days INTEGER',
@@ -405,7 +458,8 @@ export async function initializeSchema(): Promise<void> {
       language TEXT NOT NULL DEFAULT 'en',
       score INTEGER,
       started_at TEXT DEFAULT (datetime('now')),
-      finished_at TEXT
+      finished_at TEXT,
+      expired_at TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS assessment_attempt_items (
       attempt_id INTEGER NOT NULL REFERENCES assessment_attempts(id),
