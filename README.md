@@ -97,69 +97,90 @@ calls, and rate-limited authentication.
 
 ---
 
-## For Students
+## What the engine actually does
 
-**Learn at your own pace with an AI tutor that actually understands you.**
+The parts below describe the machinery, not a feature list. Today it is exercised
+through a tutor chat and a quiz; both are interventions, and neither is the point.
 
-1. **Sign up** with your email and grade level
-2. **Pick a subject** - Math, Reading, or Science
-3. **Chat with your tutor** - Ask questions, work through problems, get explanations that make sense
-4. **Show what you know** - Take short quizzes to prove you've mastered a concept
-5. **Keep going** - Unlock new concepts as you progress
+### Evidence
 
-The AI tutor adjusts to your grade level. A 3rd grader learning fractions gets different explanations than a 7th grader. Stuck on something? Just ask - the tutor will try a different approach.
+Every answer is graded **on the server**, against the item as it was stored when
+the attempt opened — the browser is never asked what the score was, and never
+told the right answer until after the learner commits. Each attempt is tied to an
+immutable, content-hashed snapshot of exactly the questions it showed, so a
+mastery decision made a year ago can still be reconstructed from the evidence
+that produced it.
+
+Alongside correctness, the engine records how long each answer took, and whether
+a quiz was abandoned mid-way — because "found it hard" and "walked away" need
+different responses and look identical in a score.
+
+### Knowledge state
+
+Per learner and skill: a mastery estimate, how much evidence it rests on, when
+that evidence last arrived, and when the concept is due to be checked again.
+Mastery does not decay silently — a concept that was mastered and then failed is
+rescheduled, not quietly forgotten.
+
+*Not there yet: a real confidence estimate (it is currently a constant), and any
+record of which misconception a learner keeps repeating.*
+
+### Decision
+
+From that state the engine decides what should happen next, and **writes down
+why**. Every decision — the review interval, the diagnosis, the XP, the
+remediation — is stored with the signals behind it, in the same transaction that
+stores its consequences. A decision that lands without its justification would be
+worse than one that fails.
+
+A learner who is told they were rushing can disagree, and the disagreement is
+kept as part of the record rather than discarded.
+
+### Intervention
+
+Currently: an explanation from the tutor, a hint, a quiz, or being sent back to a
+prerequisite. The architecture treats these as instances of one thing, so that a
+worked example, a diagnostic probe, a link to the school's own material, or five
+minutes of a teacher's attention can be chosen on the same footing — and compared
+on the same evidence.
+
+*Not there yet: interventions as a first-class entity. This is the next contract
+change.*
+
+### Outcome
+
+Whether the intervention worked, fed back as new evidence. The measurement that
+matters most — checking internal estimates against an assessment the engine did
+**not** author — is designed and not built. Until it exists, the system can only
+mark its own homework.
 
 ---
 
-## For Parents
+## For students and parents
 
-**Stay connected to your child's learning without hovering.**
+A student signs up with an email and a grade level, works through concepts with a
+tutor that adapts its explanations to that level, and demonstrates understanding
+on a short quiz — 80% to master a concept, which then unlocks what depends on it.
 
-1. **Create a parent account**
-2. **Link to your child** using a simple invite code they generate
-3. **See their progress** - Which subjects they're working on, what they've mastered, where they might need help
-4. **Get coaching** - Chat with an AI that helps you support your child's learning at home
+A parent creates their own account and links to a learner with an invite code the
+learner generates. They can see progress and get coaching on how to help at home;
+they cannot do the work, and nobody sees a learner's record without an accepted
+link.
 
-You can see what your child is learning, but you can't do their work for them. The parent coach gives you practical tips - like how to make math practice fun or what questions to ask about their reading.
-
----
-
-## Why Open Alpha?
-
-**Learning should be personal.** Every student learns differently. AI tutoring adapts to each student instead of forcing everyone through the same lessons.
-
-**Parents want to help.** But not everyone knows how to explain long division or help with reading comprehension. The parent coach bridges that gap.
-
-**Education shouldn't break the bank.** Open Alpha runs on free infrastructure tiers. No venture capital, no pressure to monetize your children's data.
+Nine subjects are available — mathematics, algebra, reading, science, computer
+science, accounting, personal finance, AI and marketing. Nine of 141 concepts
+have authored quizzes; the rest generate them on first visit and cache them.
 
 ---
 
-## Subjects Available
+## Subjects
 
-- **Mathematics** - From counting to calculus, adapted to grade level
-- **Algebra 1** - Variables, equations, functions, and graphing
-- **Reading & Language Arts** - Comprehension, vocabulary, writing skills
-- **Science** - Biology, chemistry, physics, earth science basics
-- **Computer Science** - Programming concepts, algorithms, data structures
-- **Accounting & Bookkeeping** - Financial records, statements, the language of business
-- **Personal Tax & Finance** - Taxes, budgeting, investing basics
-- **Artificial Intelligence** - How AI systems work, prompt engineering, ethics
-- **Marketing** - Strategy, branding, consumer behaviour
+Mathematics · Algebra 1 · Reading & Language Arts · Science · Computer Science ·
+Accounting & Bookkeeping · Personal Tax & Finance · Artificial Intelligence ·
+Marketing
 
-Subjects with pre-authored lessons load instantly. Newer subjects generate lessons on-demand via AI on first visit and cache them for everyone after — usually 15–30 seconds the first time, instant on every subsequent load.
-
----
-
-## How Mastery Works
-
-Students don't just click through lessons. They demonstrate understanding:
-
-1. Learn a concept through conversation with the AI tutor
-2. When ready, take a 5-question quiz
-3. Score 80% or higher to "master" the concept
-4. Mastered concepts unlock the next topics
-
-This isn't about speed - it's about actually understanding the material before moving on.
+Concepts with authored content load instantly. The rest are generated on first
+visit and cached for everyone after — usually 15–30 seconds once, then instant.
 
 ---
 
@@ -185,7 +206,10 @@ This isn't about speed - it's about actually understanding the material before m
 ## Questions?
 
 **Is this free?**
-Yes. Open Alpha runs on free hosting and database tiers. The AI is powered by ATXP, which provides generous free usage.
+Yes. Open Alpha runs on free hosting and database tiers, with a spending ceiling
+on model calls. The engine talks to any OpenAI-compatible endpoint — this
+deployment happens to use the ATXP gateway, which is a configuration choice, not
+part of what Open Alpha is.
 
 **Is my child's data safe?**
 Not yet suitable for children — see "Where it actually is today" above. For
@@ -225,13 +249,20 @@ Open Alpha is open source. You can see exactly how it works, suggest improvement
 | Frontend | React + Vite |
 | API | Handlers in `api/`, taking a Web `Request` and returning a `Response` |
 | Database | libsql — a local SQLite file, or Turso |
-| AI | OpenAI-compatible endpoint (currently the ATXP gateway) |
+| AI | Any OpenAI-compatible endpoint — this deployment uses the ATXP gateway |
 | Hosting | Vercel, or a container anywhere (`Dockerfile` + `server/`) |
 
 The handlers are plain functions over the Web `Request`/`Response` types, so
 they run under Vercel's file-based routing *and* under `server/routes.ts`,
 which reproduces that mapping in one Node process. Nothing about the API is
 tied to a hosting provider.
+
+**No model vendor belongs in the pedagogy.** The engine should ask for a
+*capability* — explain, hint, classify an error, generate an item, evaluate an
+open response — and let a policy decide which provider and model answers, per
+learner, course or organisation. That separation is designed and not yet built:
+today every call goes through one chokepoint in `api/_lib/llm.ts`, which is the
+right shape but still names a single endpoint and model.
 
 ### Local Development
 
@@ -244,7 +275,7 @@ cd open-alpha
 npm install
 
 # Set up environment variables
-# Create .env files with your TURSO and ATXP credentials
+# JWT_SECRET and a database URL are required; see below
 
 # Run locally
 npm run dev
@@ -276,7 +307,10 @@ open-alpha/
 For production (Vercel):
 - `TURSO_DATABASE_URL` - Your Turso database URL
 - `TURSO_AUTH_TOKEN` - Turso authentication token
-- `ATXP_CONNECTION_STRING` - ATXP LLM Gateway credentials
+- `ATXP_CONNECTION_STRING` - Credentials for the model endpoint. The client is
+  plain OpenAI-compatible; the endpoint URL and model id are currently constants
+  in `api/_lib/llm.ts`, which is a known limitation — pointing the engine at a
+  local or institutional endpoint is a roadmap item, not a config change.
 - `JWT_SECRET` - Secret for signing auth tokens
 - `ADMIN_INIT_KEY` - Key for database initialization endpoint
 - `CURRICULUM_REQUIRE_DATABASE` - Set to `true` to refuse to start when the

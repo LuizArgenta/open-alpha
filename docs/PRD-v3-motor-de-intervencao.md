@@ -1,12 +1,23 @@
 # PRD v3 — Motor de intervenção
 
-*6 de setembro de 2026. Recalibração arquitetural. Não substitui as PRDs v1 e v2 — reinterpreta os mecanismos delas dentro de um laço maior.*
+*6 de setembro de 2026. Recalibração arquitetural.*
+
+**Relação com os outros documentos:**
+
+- **[PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md)** permanece como está: é a **constituição do motor pedagógico**, e acerta em quatro decisões que este documento não revisa — motor determinístico antes do LLM, retenção como parte do domínio, diagnóstico de erro, e intervenção humana orientada por sinal. Explica de onde o projeto veio.
+- **[PRD v2 — plataforma](./PRD-plataforma-de-aprendizagem.md)** tem duas metades. O **backlog de funcionalidades** continua válido e é referenciado pelo plano de execução. O **enquadramento de produto** — currículo → conceito → lição → prova → mastery → próximo conceito — é **substituído por este documento**. Não foi reescrito para preservar o registro; é aqui que se lê o que o produto é.
+
+Este documento não substitui mecanismos. Reinterpreta os que existem dentro de um laço maior.
 
 ---
 
 ## 1. Tese
 
-**O Open Alpha é um motor de inteligência e intervenção sobre a aprendizagem.** Observa evidências, estima o estado do aluno, escolhe a menor intervenção útil, mede o resultado e atualiza o estado.
+> **Open Alpha is an open adaptive learning engine that uses evidence to understand what a learner knows, choose the most effective next intervention, and verify whether it worked.**
+
+Observa evidências, estima o estado do aluno, escolhe a menor intervenção útil, mede o resultado e atualiza o estado.
+
+A definição anterior — *"plataforma de aprendizagem com tutor de IA"* — não está errada, está **pequena demais**. Ela descreve uma das saídas possíveis do motor como se fosse o motor.
 
 Não precisa ser uma LXP. Pode oferecer lições, mas isso é *uma forma* de intervenção, não o produto.
 
@@ -37,7 +48,19 @@ Evidência → Estado de conhecimento → Decisão → Intervenção → Resulta
      └──────────────────────────────────────────────────────────┘
 ```
 
-**Princípio de economia de intervenção:** o objetivo não é maximizar tempo no aplicativo. É resolver a lacuna com a menor intervenção necessária e devolver o aluno ao fluxo normal.
+Dois princípios governam o laço, e os dois são restrições de desenho, não features.
+
+**Economia de intervenção.** O objetivo não é maximizar tempo no aplicativo. É resolver a lacuna com a menor intervenção necessária e devolver o aluno ao fluxo normal.
+
+**Validação externa.** *O sistema precisa medir continuamente se suas estimativas internas predizem aprendizagem fora dele.*
+
+Sem isso, o laço se fecha sobre si mesmo:
+
+```
+Open Alpha ensina  →  Open Alpha avalia  →  Open Alpha conclui que o Open Alpha funciona
+```
+
+Um motor que só se mede com instrumentos que ele mesmo ensinou não tem como estar errado — e "não tem como estar errado" não é elogio, é a definição de não ser científico. A avaliação externa (seção 8) é o que dá ao sistema a possibilidade de ser desmentido, e por isso é princípio, não item de backlog.
 
 ## 3. Non-goals
 
@@ -148,22 +171,68 @@ Ele também paga por si em pedagogia: quando um responsável contestar uma expli
 
 ## 6. Modelo de domínio
 
-### 6.1 Intervention (nova, primeira classe)
+### 6.1 Knowledge State (nova abstração sobre o que já existe)
+
+`progress` cumpre parte da função, mas conceitualmente ele é **progresso** — quanto o aluno andou. O que o motor precisa é **estado de conhecimento**: o que ele sabe, com que confiança, e há quanto tempo isso foi verificado.
+
+```
+knowledge_state  (por aluno × habilidade)
+  mastery_estimate
+  confidence
+  retention_estimate
+  evidence_count
+  last_evidence_at
+  source
+  misconceptions
+```
+
+`progress` continua sendo a implementação inicial. A abstração é que muda.
+
+**A maior parte disso já existe com outro nome** — e vale a tabela, porque separa o que é renomeação do que é trabalho:
+
+| Campo | Hoje | Situação |
+|---|---|---|
+| `mastery_estimate` | `progress.mastery_score` | ✅ existe |
+| `evidence_count` | `progress.attempts` | ✅ existe |
+| `last_evidence_at` | `progress.last_attempt_at` | ✅ existe |
+| `source` | `progress.mastery_source` | ✅ existe |
+| `confidence` | `progress.mastery_confidence` | ⚠️ **existe e mente** — fixo em `1.0` para prova, `0.6` para nivelamento |
+| `retention_estimate` | `review_interval_days`, `next_review_at` | ⚠️ **coisa diferente.** Um agendamento diz *quando perguntar de novo*; uma estimativa diz *qual a chance de ainda saber*. Hoje só existe o primeiro |
+| `misconceptions` | — | ❌ **não existe**, e depende da onda 0.1a |
+
+Duas conclusões práticas:
+
+1. **Adotar Knowledge State é barato.** Cinco dos sete campos são renomeação de coisas que já estão no banco.
+2. **Os dois que faltam são os que dão valor.** `confidence` real é o item 23 (BKT/Elo, adiado até haver dados — corretamente). `misconceptions` é o que torna a fila do professor possível, e é a onda 0.1.
+
+### 6.2 Intervention (nova, primeira classe)
 
 ```
 interventions
-  id, type, concept_id, source, content_ref, estimated_minutes, version, status
+  id, type, target, source, content_ref,
+  estimated_minutes, version, status
 
 intervention_runs
   id, intervention_id, student_id, decision_id,
+  reason, evidence, expected_outcome,
   started_at, completed_at, outcome, evidence_summary
 ```
 
-`type`: `explanation`, `worked_example`, `micro_lesson`, `practice`, `retrieval`, `diagnostic_probe`, `ai_tutoring`, `teacher_intervention`, `external_resource`.
+`type`: `micro_lesson`, `practice`, `retrieval`, `diagnostic_probe`, `ai_tutoring`, `worked_example`, `explanation`, `teacher_action`, `external_resource`, `peer_activity`.
+
+**`expected_outcome` é o campo mais importante desta tabela**, e o menos óbvio. Sem ele só dá para medir *o que aconteceu*. Com ele dá para medir *se a decisão estava certa* — a diferença entre telemetria e uma afirmação testável.
+
+É o que torna respondível a pergunta que define o moat:
+
+> Para alunos com o erro X no contexto Y, qual intervenção produz maior ganho **e maior retenção**?
+
+Sem `expected_outcome` registrado antes do resultado, essa comparação é retrospectiva e enviesada — sempre se acha uma explicação para o que já aconteceu.
+
+`reason` e `evidence` gravam *por que* esta intervenção foi escolhida e *sobre o que*, o que é a mesma exigência que `learning_decisions` já cumpre para decisões: uma escolha sobre alguém tem que poder ser contestada.
 
 **Guardrail:** Intervention não pode virar "uma nova tabela de lesson". Se ela não representar ação humana, recurso externo e ação de IA com igual naturalidade, o desenho falhou.
 
-### 6.2 Contrato de decisão
+### 6.3 Contrato de decisão
 
 O motor deixa de responder `nextConcept` e passa a responder uma ação:
 
@@ -177,9 +246,39 @@ O motor deixa de responder `nextConcept` e passa a responder uma ação:
 
 `nextConcept` permanece internamente por compatibilidade.
 
-### 6.3 Preservado sem alteração
+### 6.4 Preservado sem alteração
 
 Tentativas, respostas, snapshots imutáveis de item, `learning_decisions`, `progress`, revisão espaçada, grafo curricular, `staff_roles`, migrações versionadas, backup/restore, teto de LLM. **A recalibração não justifica reconstrução.**
+
+### 6.5 Learning Event Contract (EDP-lite)
+
+`learning_events` deixa de ser uma tabela de telemetria e passa a ser **vocabulário estável e versionado** dos acontecimentos pedagógicos.
+
+```
+event_id
+schema_version
+organization_id
+student_id
+actor_id
+event_type
+object_type / object_id
+subject_id / concept_id
+attempt_id / intervention_id
+occurred_at
+source
+payload
+```
+
+**Não precisa de Kafka, data lake nem nenhuma outra forma sofisticada de transformar dinheiro em YAML.** SQLite e Turso servem no estágio atual. O que precisa existir é o *contrato*.
+
+É o que permite depois — analytics, experimentos, avaliação do próprio motor, integrações, auditoria e pesquisa — **sem acoplar cada consumidor às tabelas operacionais**, que é o acoplamento que torna schema impossível de mudar.
+
+Duas restrições que este documento mantém:
+
+- **Não é event sourcing.** As tabelas operacionais continuam sendo a fonte de escrita; o stream é evidência e telemetria.
+- **Não serve auditoria de segurança.** Login, mudança de papel e acesso administrativo querem append-only e imutabilidade, que são propriedades diferentes. Isso é o item 26 e precisa de tabela própria — misturar daria a pior versão de cada um.
+
+E a pré-condição da seção 5.2 continua valendo: **o servidor precisa escrever no stream antes de o contrato significar alguma coisa.** Um vocabulário canônico sobre um stream que só o navegador alimenta canoniza os buracos.
 
 ## 7. Camada de IA
 
@@ -211,9 +310,19 @@ Barato de começar e alto valor — por isso sobe na fila.
 
 ## 9. Camada escolar
 
-`Organization → (Campus) → AcademicTerm → Class → {Teacher assignments, Enrollments}`
+```
+Organization
+ ├── Campus            (opcional)
+ ├── AcademicTerm
+ ├── Membership        (quem pertence à organização, e em que papel)
+ └── Class
+      ├── Teacher assignments
+      └── Enrollment
+```
 
-"Organization" e não "school", para atender colégio, rede, secretaria ou curso independente.
+**`Organization`, e não `School`.** Não é preciosismo: nomear "school" codifica o produto como *um app para uma escola*, e depois atender rede, secretaria, universidade, curso independente ou homeschool vira migração de schema em produção. É **decisão barata agora e cara depois** — a única razão de ela aparecer neste documento antes de ser implementada.
+
+`Membership` separado de `Enrollment` pela mesma razão: pertencer a uma organização e estar matriculado numa turma são coisas diferentes, e um professor é o caso que prova.
 
 **Não antes do piloto.** Adicionar `organization_id` significa reauditar o escopo de cada endpoint — a varredura de IDOR foi feita contra `student_id` e vínculo de responsável. É custo sem pagador enquanto não houver organização real.
 

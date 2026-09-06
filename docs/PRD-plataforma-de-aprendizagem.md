@@ -2,6 +2,11 @@
 
 Continuação de [PRD-adaptive-learning-engine.md](./PRD-adaptive-learning-engine.md), que cobre as Fases 0 a 6 (motor de decisão, revisão espaçada, diagnóstico de erro, focus meter, validação de conteúdo, painel acionável).
 
+
+> **Nota de 6 de setembro de 2026.** O **backlog de funcionalidades** deste documento continua válido e é rastreado pelo [plano de execução](./PLANO-DE-EXECUCAO.md). O **enquadramento de produto** — currículo → conceito → lição → prova → mastery → próximo conceito — foi substituído pelo [PRD v3](./PRD-v3-motor-de-intervencao.md), onde lição e prova passam a ser *tipos de intervenção* dentro do laço evidência → estado → decisão → intervenção → resultado.
+>
+> Este documento não foi reescrito de propósito: ele é o registro de como o produto foi entendido nesta fase, e apagar isso tornaria a evolução ilegível daqui a seis meses.
+
 Este documento lista o que falta para o Open Alpha ter a arquitetura de aprendizagem completa descrita no relatório do Timeback, **mantendo-se como webapp**.
 
 ---
