@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { assertLlmAvailable, recordUsage } from './llm-budget.js';
 
 const LLM_BASE_URL = 'https://llm.atxp.ai/v1';
 
@@ -18,6 +19,24 @@ function getClient(): OpenAI {
   });
 
   return client;
+}
+
+/**
+ * Every model call in this file goes through here.
+ *
+ * One chokepoint rather than a check at each call site: a budget that a new
+ * endpoint can forget to consult is a budget that a new endpoint will forget
+ * to consult. Refusal happens before the request is sent, and what the call
+ * actually cost is recorded after it returns.
+ */
+async function complete(
+  purpose: string,
+  body: Parameters<OpenAI['chat']['completions']['create']>[0]
+) {
+  await assertLlmAvailable();
+  const response = await getClient().chat.completions.create({ ...body, stream: false });
+  await recordUsage(purpose, String(body.model), response.usage);
+  return response;
 }
 
 /** Languages the product ships in. Content is generated per language. */
@@ -161,7 +180,7 @@ export async function chatWithTutor(
     ...messages,
   ];
 
-  const response = await openai.chat.completions.create({
+  const response = await complete('tutor_chat', {
     model,
     messages: fullMessages,
     max_tokens: 1024,
@@ -184,7 +203,7 @@ export async function chatWithCoach(
     ...messages,
   ];
 
-  const response = await openai.chat.completions.create({
+  const response = await complete('coach_chat', {
     model,
     messages: fullMessages,
     max_tokens: 1024,
@@ -305,7 +324,7 @@ export async function generateLesson(
 
   const prompt = getLessonGenerationPrompt(ctx);
 
-  const response = await openai.chat.completions.create({
+  const response = await complete('lesson_generation', {
     model,
     messages: [{ role: 'user', content: prompt }],
     max_tokens: 8192,
@@ -346,7 +365,7 @@ Rules:
 Lesson JSON:
 ${JSON.stringify(lesson)}`;
 
-  const response = await openai.chat.completions.create({
+  const response = await complete('lesson_translation', {
     model,
     messages: [{ role: 'user', content: prompt }],
     max_tokens: 8192,
@@ -403,7 +422,7 @@ Make questions age-appropriate and progressively challenging.
 
 ${languageInstruction(language)}`;
 
-  const response = await openai.chat.completions.create({
+  const response = await complete('quiz_generation', {
     model: 'claude-sonnet-4-6',
     messages: [{ role: 'user', content: prompt }],
     max_tokens: 2048,

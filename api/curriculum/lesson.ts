@@ -14,6 +14,7 @@
  */
 
 import { executeSql } from '../_lib/db.js';
+import { LlmUnavailableError, unavailableResponse } from '../_lib/llm-budget.js';
 import { getSubject, getConcept, type Concept } from '../_lib/curriculum.js';
 import {
   DEFAULT_CONTENT_LANGUAGE,
@@ -242,6 +243,9 @@ export async function GET(request: Request) {
       { headers: CORS_HEADERS }
     );
   } catch (error) {
+    // A refused model call is not a server fault: say which limit was hit
+    // so the interface can tell a budget from an outage.
+    if (error instanceof LlmUnavailableError) return unavailableResponse(error);
     console.error('Lesson fetch/generate error:', error);
     return Response.json(
       { error: 'Failed to fetch or generate lesson content' },
