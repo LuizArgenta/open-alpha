@@ -257,12 +257,12 @@ they run under Vercel's file-based routing *and* under `server/routes.ts`,
 which reproduces that mapping in one Node process. Nothing about the API is
 tied to a hosting provider.
 
-**No model vendor belongs in the pedagogy.** The engine should ask for a
-*capability* — explain, hint, classify an error, generate an item, evaluate an
-open response — and let a policy decide which provider and model answers, per
-learner, course or organisation. That separation is designed and not yet built:
-today every call goes through one chokepoint in `api/_lib/llm.ts`, which is the
-right shape but still names a single endpoint and model.
+**No model vendor belongs in the pedagogy.** The engine asks for a *capability*
+— tutor, generate an item, translate a lesson — and `api/_lib/model-policy.ts`
+decides which endpoint and model answer it. A test fails if any model id appears
+in the engine's code. Policy per learner, class or organisation is a later step
+and needs schools to exist first; what works today is a deployment or an
+institution saying "use our endpoint and our model".
 
 ### Local Development
 
@@ -307,10 +307,15 @@ open-alpha/
 For production (Vercel):
 - `TURSO_DATABASE_URL` - Your Turso database URL
 - `TURSO_AUTH_TOKEN` - Turso authentication token
-- `ATXP_CONNECTION_STRING` - Credentials for the model endpoint. The client is
-  plain OpenAI-compatible; the endpoint URL and model id are currently constants
-  in `api/_lib/llm.ts`, which is a known limitation — pointing the engine at a
-  local or institutional endpoint is a roadmap item, not a config change.
+- `ATXP_CONNECTION_STRING` - Credentials for the model endpoint.
+- `LLM_BASE_URL` - Any OpenAI-compatible endpoint, including a local or
+  institutional one. Defaults to the ATXP gateway.
+- `LLM_MODEL` - The model this deployment asks for. Defaults to
+  `claude-sonnet-4-6`.
+- `LLM_MODEL_<CAPABILITY>` - Overrides the model for one capability:
+  `TUTOR_CHAT`, `COACH_CHAT`, `LESSON_GENERATION`, `LESSON_TRANSLATION`,
+  `QUIZ_GENERATION`. A deployment can want something careful for a
+  conversation and something structured for item generation.
 - `JWT_SECRET` - Secret for signing auth tokens
 - `ADMIN_INIT_KEY` - Key for database initialization endpoint
 - `CURRICULUM_REQUIRE_DATABASE` - Set to `true` to refuse to start when the
