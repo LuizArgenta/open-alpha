@@ -1,6 +1,13 @@
 import bcrypt from 'bcryptjs';
 import { executeSql } from '../_lib/db.js';
 import { signToken } from '../_lib/auth.js';
+import {
+  SIGNUPS_PER_IP,
+  clientIp,
+  isRateLimited,
+  recordAttempt,
+  tooManyAttempts,
+} from '../_lib/rate-limit.js';
 
 interface User {
   id: number;
@@ -27,6 +34,18 @@ export async function POST(request: Request) {
 
     if (role === 'student' && gradeLevel === undefined) {
       return Response.json({ error: 'Grade level is required for students' }, { status: 400 });
+    }
+
+    // Signup does leak whether an address is registered — it has to answer
+    // "that email is taken" for the form to be usable, and closing that
+    // properly needs an email-verification flow this deployment does not
+    // have. Capping attempts per address is the mitigation available today:
+    // it does not stop someone checking one address, it stops them checking
+    // a list. Recorded before the check so probing spends its own budget.
+    const ip = clientIp(request);
+    await recordAttempt('signup', 'ip', ip);
+    if (await isRateLimited('signup', 'ip', ip, SIGNUPS_PER_IP)) {
+      return tooManyAttempts();
     }
 
     // Check if email exists
