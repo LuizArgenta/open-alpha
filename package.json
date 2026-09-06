@@ -17,7 +17,9 @@
     "db:setup": "npm run db:setup --workspace=backend",
     "lint": "npm run lint --workspaces",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",
