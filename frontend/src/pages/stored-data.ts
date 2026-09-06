@@ -76,6 +76,11 @@ export const WHAT_IS_STORED: StoredData[] = [
     why: 'A guardian can see a linked learner\'s record. Nobody sees it without an accepted link.',
   },
   {
+    table: 'auth_attempts',
+    what: 'Failed sign-in and sign-up attempts: when, and a one-way hash of the email or IP they were made with — never the address itself. Successful sign-ins are not recorded here, and your own clears the count.',
+    why: 'So a password cannot be guessed at the speed of the network. Kept only for the few minutes the limit looks back, then swept.',
+  },
+  {
     table: 'guest_sessions',
     what: 'If you use the demo without an account: your messages, and a one-way hash of your IP address — never the address itself.',
     why: 'To keep the demo usable without letting one visitor exhaust it for everyone.',

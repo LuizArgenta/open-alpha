@@ -26,6 +26,7 @@ import { executeSql } from '../_lib/db.js';
 import { LlmUnavailableError, demoModeIsEnabled, unavailableResponse } from '../_lib/llm-budget.js';
 import { chatWithTutor, ChatMessage, TutorContext } from '../_lib/llm.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
+import { rateLimitKey } from '../_lib/rate-limit.js';
 
 const DEMO_MESSAGE_LIMIT = 20;
 
@@ -39,16 +40,11 @@ function generateSessionId(): string {
   return 'demo_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }
 
-function hashIp(ip: string): string {
-  // Simple hash — enough to track rate limits without storing real IPs
-  let hash = 0;
-  for (let i = 0; i < ip.length; i++) {
-    const char = ip.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(16);
-}
+// The previous hash here was the 32-bit Java string hash, with a comment
+// claiming it avoided storing real IPs. It did not: the whole IPv4 space is
+// four billion guesses against 32 bits, which is seconds of work, and the
+// collisions also made it a poor rate-limit key — unrelated visitors shared
+// buckets. rateLimitKey is SHA-256 with the deployment's secret mixed in.
 
 interface DemoSession {
   id: string;
@@ -123,7 +119,7 @@ export async function POST(request: Request) {
     } else {
       // Rate limit: max 3 new demo sessions per IP per hour
       const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-      const ipHash = hashIp(clientIp);
+      const ipHash = rateLimitKey(clientIp);
 
       const recentSessions = await executeSql<{ count: number }>(
         `SELECT COUNT(*) as count FROM guest_sessions
