@@ -14,7 +14,7 @@
  * change the outcome.
  */
 
-import { executeSql } from '../../_lib/db.js';
+import { executeSql, withTransaction } from '../../_lib/db.js';
 import { getAuthFromRequest, forbidden, unauthorized } from '../../_lib/auth.js';
 import { ATTEMPT_DEADLINE_MODIFIER, attemptExpired, expireAttempt } from '../../_lib/attempts.js';
 
@@ -95,27 +95,37 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Item not found' }, { status: 404 });
     }
 
-    // Answering the same item twice returns the first answer rather than
-    // replacing it: otherwise a student could keep trying until it is right.
-    const existing = await executeSql<ExistingResponseRow>(
-      'SELECT chosen, correct FROM assessment_responses WHERE attempt_id = $1 AND item_id = $2',
-      [attemptId, itemId]
-    );
-    if (existing.rows.length > 0) {
-      return Response.json({
-        correct: existing.rows[0].correct === 1,
-        chosen: existing.rows[0].chosen,
-        correctAnswer: item.rows[0].correct_answer,
-        explanation: item.rows[0].explanation,
-        alreadyAnswered: true,
-      });
-    }
-
     const correct = chosen === item.rows[0].correct_answer;
 
-    await executeSql(
+    /**
+     * The checks above ran three round trips ago, and two other writers can
+     * act in that window.
+     *
+     * `submit` closes the attempt: an answer that passed the open check before
+     * the submission read the responses used to land *after* the score, the
+     * mastery decision and the XP were written from a set that did not include
+     * it. The row stayed in the table, uncounted — a stored score its own
+     * stored evidence could not explain, which is the one thing this whole
+     * assessment path exists to guarantee.
+     *
+     * Another `answer` for the same item does the same to the "already
+     * answered?" read: both requests saw nothing and both inserted. The unique
+     * index kept the database honest and turned the loser into a 500 for a
+     * request that had, in every sense the student cares about, succeeded.
+     *
+     * So the condition travels with the write instead of preceding it. One
+     * statement: insert only while the attempt is still open, and only if this
+     * item has no answer yet. Nothing between the test and the act.
+     */
+    const inserted = await withTransaction(scope => scope.run<{ id: number }>(
       `INSERT INTO assessment_responses (attempt_id, item_id, chosen, correct, response_ms)
-       VALUES ($1, $2, $3, $4, $5)`,
+       SELECT $1, $2, $3, $4, $5
+       WHERE EXISTS (
+         SELECT 1 FROM assessment_attempts
+         WHERE id = $1 AND finished_at IS NULL AND expired_at IS NULL
+       )
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
       [
         attemptId,
         itemId,
@@ -125,7 +135,31 @@ export async function POST(request: Request) {
         // progress; it feeds the focus signals only.
         Number.isFinite(responseTimeMs) ? responseTimeMs : null,
       ]
-    );
+    ));
+
+    // Nothing written. Either this item was answered while we were deciding,
+    // or the attempt closed underneath us — and the student is owed different
+    // answers, so read back which it was rather than guessing.
+    if (inserted.rows.length === 0) {
+      const existing = await executeSql<ExistingResponseRow>(
+        'SELECT chosen, correct FROM assessment_responses WHERE attempt_id = $1 AND item_id = $2',
+        [attemptId, itemId]
+      );
+
+      // Answering the same item twice returns the first answer rather than
+      // replacing it: otherwise a student could keep trying until it is right.
+      if (existing.rows.length > 0) {
+        return Response.json({
+          correct: existing.rows[0].correct === 1,
+          chosen: existing.rows[0].chosen,
+          correctAnswer: item.rows[0].correct_answer,
+          explanation: item.rows[0].explanation,
+          alreadyAnswered: true,
+        });
+      }
+
+      return Response.json({ error: 'Attempt already finished' }, { status: 409 });
+    }
 
     return Response.json({
       correct,

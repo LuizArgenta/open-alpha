@@ -10,7 +10,7 @@ Documentos relacionados: [PRD v1 — motor adaptativo](./PRD-adaptive-learning-e
 
 ## Onde estamos
 
-*Atualizado em 5 de setembro de 2026.*
+*Atualizado em 6 de setembro de 2026.*
 
 Mergeado em `main` (PRs #1 a #19): motor de decisão com volta ao pré-requisito, revisão espaçada, diagnóstico do tipo de erro, medidor de foco contestável, validação de lição gerada, alertas ao responsável, XP ligado a prova de aprendizagem, evidência de avaliação, log de decisões, linha do tempo, override humano, nivelamento, currículo no banco, autoria de matérias e árvores, pt-BR como padrão e CI.
 
@@ -20,7 +20,7 @@ Da segunda auditoria, já mergeados: [#28](https://github.com/LuizArgenta/open-a
 
 [#32](https://github.com/LuizArgenta/open-alpha/pull/32) trouxe o banco de itens (item 19) e o núcleo do item 10; auditado no próprio PR antes de mesclar, com o conflito em `db.ts` resolvido preservando as três migrações. [#34](https://github.com/LuizArgenta/open-alpha/pull/34) fechou o item 11 e a API de transação com callback que os itens 9 e 11 precisavam, [#35](https://github.com/LuizArgenta/open-alpha/pull/35) fechou o item 9 — de quebra, tapando uma exposição a `SQLITE_BUSY` que existia desde o PR #22 — [#36](https://github.com/LuizArgenta/open-alpha/pull/36) fechou o item 10 e [#37](https://github.com/LuizArgenta/open-alpha/pull/37) fechou o item 12 — **com isso a metade de integridade do Marco 1 (itens 1 a 12) está inteira** — [#38](https://github.com/LuizArgenta/open-alpha/pull/38) endureceu a cadeia de build (item 18, metade que sai por PR) e [#39](https://github.com/LuizArgenta/open-alpha/pull/39) fechou a varredura de IDOR (item 16).
 
-**286 testes** em `main`, contra 160 quando este plano foi escrito.
+**323 testes** em `main`, contra 160 quando este plano foi escrito.
 
 **Cobertura de conteúdo autorado, medida e não estimada:** dos **141 conceitos**, apenas **9** têm `masteryCheck`. Todos os 9 têm `id` estável e ≥5 itens, então o banco de itens do #32 não regride nada — mas quer dizer que os itens 19 a 21 valem hoje para **6% do currículo**. Os outros 94% caem na geração por LLM. Nenhum algoritmo de seleção conserta isso; é trabalho de autoria, e está registrado em "Fora de PR".
 
@@ -176,6 +176,10 @@ Coisas que a auditoria não listou e que o trabalho dos PRs #22–#26 revelou. R
 - **Não havia nada entre as chamadas de modelo e a fatura.** 94% do currículo gera lição e prova sob demanda, e o `demo/chat.ts` faz isso para qualquer um com a URL, sem conta. Fechado no [PR #43](https://github.com/LuizArgenta/open-alpha/pull/43): teto de tokens por janela contado no banco, chave de desligamento (`LLM_ENABLED=false`), interruptor separado para o modo demo, e as cinco chamadas de modelo passando por um estrangulamento único — teto que um endpoint novo pode esquecer de consultar é teto que um endpoint novo vai esquecer de consultar.
 
 - **Um teste deixava mobília no banco compartilhado.** Todos os arquivos de teste dividem o mesmo banco de rascunho, e `sql-param-binding.test.ts` criava uma tabela `sql_binding_probe` que nunca apagava. Ninguém notou porque nada olhava o schema inteiro — até o teste do aviso de dados olhar, e encontrar uma tabela de teste se passando por parte do produto. Corrigido no #44; o padrão vale de lição: teste que cria estrutura no banco compartilhado limpa depois de si.
+
+- **Uma corrida entre responder e finalizar a prova.** Encontrada por uma auditoria externa em 6 de setembro e confirmada no código: `answer` conferia que a tentativa estava aberta e só inseria três idas ao banco depois, enquanto `submit` lia as respostas, decidia e *então* fechava a tentativa. Uma resposta que passasse pela conferência antes de o `submit` ler chegava depois de a nota estar gravada — a linha ficava na tabela, sem entrar em nada. Um aluno que acertou 5 de 5 era registrado com 80%. Isso quebra a invariante em que todo o resto se apoia: **a nota tem que ser reconstruível a partir das evidências guardadas**. Fechado no [PR #46](https://github.com/LuizArgenta/open-alpha/pull/46). A auditoria viu metade: corrigir só o `answer` deixava a invariante quebrada, porque a janela de leitura do `submit` é independente — a decisão inteira teve que passar para depois da reivindicação da tentativa.
+
+- **Escrita nua contra transação dá `SQLITE_BUSY`.** Apareceu ao corrigir a corrida acima: com o `submit` segurando o lock por mais tempo, a inserção do `answer` — um `executeSql` solto, fora da fila de escrita — passou a colidir. A correção do `submit` sozinha teria trocado um bug silencioso por um 500. As escritas do caminho de avaliação agora passam pela fila; sobram quatro `executeSql` de escrita em fluxos não relacionados (`interests`, `grant-role`, `atxp-callback`), de risco prático baixo mas da mesma classe.
 
 - **Confiança do domínio ainda é 1.0 para prova e 0.6 para nivelamento, fixos.** É o item 23, e continua certo adiar até haver aluno real — mas o campo já existe e já é lido, então o dia em que houver dado ele está pronto.
 
