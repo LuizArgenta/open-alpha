@@ -4,7 +4,7 @@ Quadro de acompanhamento do que falta para o Open Alpha ser usável de verdade p
 
 **Como manter:** marque a caixa quando o PR for **mergeado**, não quando for aberto, e anote o número do PR ao lado. Se um item se revelar desnecessário ou mudar de forma, edite a linha e diga por quê — um item riscado sem explicação vira dúvida daqui a três meses.
 
-Documentos relacionados: [PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md) · [PRD v2 — evidência, autoria e motivação](./PRD-plataforma-de-aprendizagem.md)
+Documentos relacionados: [PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md) · [PRD v2 — evidência, autoria e motivação](./PRD-plataforma-de-aprendizagem.md) · [Plano de deploy para teste](./PLANO-DEPLOY-TESTE.md)
 
 ---
 
@@ -100,7 +100,7 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
 ## Marco 4 — Plataforma equivalente
 
 - [ ] **32. API versionada, OpenAPI, erros padronizados** *(M)* — o VISION.md promete "API-first" desde o início.
-- [ ] **33. Distribuição local** *(G)* — Docker reproduzível, modo offline, LLM local por API compatível, chave de bloqueio de tráfego externo. **Antecipar para antes do piloto local**, junto do item 31.
+- [ ] **33. Distribuição local** *(G)* — Docker reproduzível, modo offline, LLM local por API compatível, chave de bloqueio de tráfego externo. **Antecipar para antes do piloto local**, junto do item 31. **Primeira metade feita** em [PR #41](https://github.com/LuizArgenta/open-alpha/pull/41): `Dockerfile`, servidor que roda os handlers de `api/` fora da Vercel, SQLite em volume, validação de ambiente no boot. Falta modo offline e LLM local — ver [plano de deploy](./PLANO-DEPLOY-TESTE.md).
 - [ ] **34. Padrões 1EdTech** *(G)* — OneRoster, CASE, QTI, Caliper.
 - [ ] **35. Aplicativos por matéria** *(XG)* — editor matemático com rascunho e passos, leitor com fluência, editor de texto com rubricas, simulações. **É aqui que mora a diferença real para a Alpha, e cada matéria é praticamente um produto.**
 
