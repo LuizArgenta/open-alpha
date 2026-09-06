@@ -7,6 +7,7 @@
  */
 
 import { executeSql } from '../../../_lib/db.js';
+import { parseDbTimestamp } from '../../../_lib/time.js';
 import { getConcept } from '../../../_lib/curriculum.js';
 import { childIdFromPath, isDenied, requireLinkedChild } from '../../../_lib/guardian.js';
 
@@ -123,7 +124,7 @@ export async function GET(request: Request) {
         reason: row.reason,
         inputs: JSON.parse(row.inputs || '{}'),
       })),
-    ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    ].sort((a, b) => parseDbTimestamp(b.at).getTime() - parseDbTimestamp(a.at).getTime());
 
     return Response.json({ events: events.slice(0, limit) });
   } catch (error) {
