@@ -19,6 +19,8 @@ const TABLES_IN_DEPENDENCY_ORDER = [
   'xp_awards',
   'assessment_attempts',
   'assessment_items',
+  // References users, interventions and learning_decisions, so it goes first.
+  'intervention_runs',
   'learning_decisions',
   'learning_events',
   'focus_contests',

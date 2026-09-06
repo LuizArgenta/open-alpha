@@ -1,6 +1,15 @@
 import { createClient } from '@libsql/client';
 import { createHash } from 'crypto';
 import { eventTypeCheckList } from './event-contract.js';
+import {
+  ENGINE_INTERVENTIONS,
+  INTERVENTION_OUTCOME_LIST,
+  INTERVENTION_SOURCE_LIST,
+  INTERVENTION_STATUS_LIST,
+  INTERVENTION_TARGET_LIST,
+  INTERVENTION_TYPE_LIST,
+} from './intervention-contract.js';
+
 
 /**
  * The event vocabulary, quoted for a CHECK constraint.
@@ -515,6 +524,93 @@ async function migrateLearningEventEnvelope(): Promise<void> {
   );
 }
 
+/**
+ * Intervention as a first-class entity.
+ *
+ * Two tables and a seed. What makes this more than bookkeeping is
+ * `expected_outcome`, written when a run starts rather than judged after it
+ * ends: without a prediction recorded first, comparing two interventions is
+ * retrospective, and something always explains what already happened.
+ *
+ * Identity is `(key, version)`. An intervention is never edited in place —
+ * revising one means a new version, because a run recorded against version 1
+ * has to keep meaning what it meant when it was written. That is also why the
+ * seed is `ON CONFLICT DO NOTHING` rather than an upsert.
+ *
+ * The vocabularies come from `interventions.ts` and the CHECKs are built from
+ * them, for the reason `learning_events` had to be rebuilt in 008: a list kept
+ * in two places is a list that will disagree with itself, and the copy in the
+ * database is the one that rejects writes silently.
+ */
+async function migrateInterventions(): Promise<void> {
+  await client.execute(`CREATE TABLE IF NOT EXISTS interventions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN (${INTERVENTION_TYPE_LIST})),
+    target_kind TEXT NOT NULL CHECK (target_kind IN (${INTERVENTION_TARGET_LIST})),
+    target_id TEXT,
+    source TEXT NOT NULL CHECK (source IN (${INTERVENTION_SOURCE_LIST})),
+    content_ref TEXT,
+    estimated_minutes INTEGER,
+    version INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN (${INTERVENTION_STATUS_LIST})),
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(key, version)
+  )`);
+
+  await client.execute(`CREATE TABLE IF NOT EXISTS intervention_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    intervention_id INTEGER NOT NULL REFERENCES interventions(id),
+    student_id INTEGER NOT NULL REFERENCES users(id),
+    decision_id INTEGER REFERENCES learning_decisions(id),
+    subject TEXT NOT NULL,
+    concept_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    evidence TEXT NOT NULL DEFAULT '{}',
+    expected_outcome TEXT NOT NULL,
+    started_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    outcome TEXT CHECK (outcome IS NULL OR outcome IN (${INTERVENTION_OUTCOME_LIST})),
+    evidence_summary TEXT
+  )`);
+
+  await client.execute(
+    'CREATE UNIQUE INDEX IF NOT EXISTS intervention_runs_run_id ON intervention_runs(run_id)'
+  );
+  await client.execute(`CREATE INDEX IF NOT EXISTS intervention_runs_open
+    ON intervention_runs(student_id, subject, concept_id, completed_at)`);
+
+  // Seeded here rather than by calling into interventions.ts: that module
+  // reads and writes through this one, and importing it back would make the
+  // cycle real. The catalogue itself is a plain constant with no database in
+  // it, which is what the contract/implementation split is for.
+  //
+  // ON CONFLICT DO NOTHING on (key, version), so a fresh deployment gets the
+  // rows and an existing one gets nothing. Revising an intervention means a
+  // new version, never an edit — a run recorded against version 1 has to keep
+  // meaning what it meant.
+  for (const intervention of ENGINE_INTERVENTIONS) {
+    await client.execute({
+      sql: `INSERT INTO interventions
+              (key, type, target_kind, target_id, source, content_ref, estimated_minutes, version, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (key, version) DO NOTHING`,
+      args: [
+        intervention.key,
+        intervention.type,
+        intervention.targetKind,
+        intervention.targetId,
+        intervention.source,
+        intervention.contentRef,
+        intervention.estimatedMinutes,
+        intervention.version,
+        intervention.status,
+      ],
+    });
+  }
+}
+
 async function migrateLlmUsage(): Promise<void> {
   await client.execute(`CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -829,6 +925,52 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now')),
       UNIQUE(user_id, category, value)
     );
+
+    -- What should be done for a student, why, and what it is meant to achieve.
+    -- See interventions.ts: this is deliberately not a second lessons table.
+    CREATE TABLE IF NOT EXISTS interventions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      -- Stable name, so a run can be read without joining and a seed can be
+      -- re-run. Identity is (key, version): changing what an intervention
+      -- *is* means a new version, never an edit, or every run recorded
+      -- against it silently changes meaning.
+      key TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN (${INTERVENTION_TYPE_LIST})),
+      target_kind TEXT NOT NULL CHECK (target_kind IN (${INTERVENTION_TARGET_LIST})),
+      target_id TEXT,
+      source TEXT NOT NULL CHECK (source IN (${INTERVENTION_SOURCE_LIST})),
+      -- Where the material lives, when it lives outside this database.
+      content_ref TEXT,
+      estimated_minutes INTEGER,
+      version INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN (${INTERVENTION_STATUS_LIST})),
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(key, version)
+    );
+
+    CREATE TABLE IF NOT EXISTS intervention_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      intervention_id INTEGER NOT NULL REFERENCES interventions(id),
+      student_id INTEGER NOT NULL REFERENCES users(id),
+      -- The decision that chose this, so a challenge to one reaches the other.
+      decision_id INTEGER REFERENCES learning_decisions(id),
+      subject TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      evidence TEXT NOT NULL DEFAULT '{}',
+      -- Written before the result, which is the whole point: without a
+      -- prediction recorded first, comparing interventions is retrospective.
+      expected_outcome TEXT NOT NULL,
+      started_at TEXT DEFAULT (datetime('now')),
+      completed_at TEXT,
+      outcome TEXT CHECK (outcome IS NULL OR outcome IN (${INTERVENTION_OUTCOME_LIST})),
+      evidence_summary TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS intervention_runs_run_id ON intervention_runs(run_id);
+    CREATE INDEX IF NOT EXISTS intervention_runs_open
+      ON intervention_runs(student_id, subject, concept_id, completed_at);
 
     -- Learning events for waste meter / timeback tracking
     CREATE TABLE IF NOT EXISTS learning_events (
@@ -1236,6 +1378,7 @@ export async function initializeSchema(): Promise<void> {
     { id: '007-llm-usage', run: migrateLlmUsage },
     { id: '008-learning-event-source', run: migrateLearningEventSource },
     { id: '009-learning-event-envelope', run: migrateLearningEventEnvelope },
+    { id: '010-interventions', run: migrateInterventions },
   ]);
 }
 

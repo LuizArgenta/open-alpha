@@ -51,6 +51,11 @@ export const WHAT_IS_STORED: StoredData[] = [
     why: 'So a decision about you can be questioned. This is kept precisely so that it can be shown to you rather than only acted on.',
   },
   {
+    table: 'intervention_runs',
+    what: 'Each time the system decided to offer you something after a quiz you did not pass: what it offered, why, what it expected that to achieve, and whether it worked.',
+    why: 'So the platform can be held to what it predicted rather than to what it explains afterwards — and so you can see the same thing it uses to judge itself.',
+  },
+  {
     table: 'focus_contests',
     what: 'When you disagree with one of those judgements and say so.',
     why: 'Your disagreement is part of the record, not a discarded click.',

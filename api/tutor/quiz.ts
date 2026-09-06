@@ -8,6 +8,7 @@ import { recordEvent } from '../_lib/events.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
 import { drawFromAuthoredItemBank, type AttemptQuestion, openAttempt, withoutAnswerKey } from '../_lib/assessment.js';
 import { expireStaleAttempts } from '../_lib/attempts.js';
+import { abandonStaleRuns } from '../_lib/interventions.js';
 
 interface User {
   grade_level: number | null;
@@ -29,6 +30,11 @@ export async function POST(request: Request) {
     // Serverless has nowhere to run a sweep, so it rides on the next quiz the
     // student opens: anything they abandoned is closed before a new one starts.
     await expireStaleAttempts(auth.userId);
+
+    // The same ride, for interventions the student never came back to. Left
+    // open they would quietly inflate every success rate, because a run with
+    // no follow-up is exactly the kind most likely to have failed.
+    await abandonStaleRuns(auth.userId);
 
     const userResult = await executeSql<User>(
       'SELECT grade_level FROM users WHERE id = $1',
