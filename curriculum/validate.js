@@ -141,10 +141,18 @@ function validate() {
     // masteryCheck validation
     if (concept.masteryCheck) {
       const questions = concept.masteryCheck.questions;
-      if (!Array.isArray(questions) || questions.length !== 5) {
-        errors.push(`${concept.file}: "${id}" masteryCheck must have exactly 5 questions (found ${Array.isArray(questions) ? questions.length : 'none'})`);
+      const masteryItems = Array.isArray(questions)
+        ? questions.filter(q => (q.purpose ?? 'mastery') === 'mastery')
+        : [];
+      if (!Array.isArray(questions) || masteryItems.length < 5) {
+        errors.push(`${concept.file}: "${id}" masteryCheck must have at least 5 mastery items (found ${masteryItems.length})`);
       } else {
+        const questionIds = new Set();
         for (const q of questions) {
+          if (!q.id || questionIds.has(q.id)) {
+            errors.push(`${concept.file}: "${id}" masteryCheck question ids must be present and unique (found "${q.id}")`);
+          }
+          questionIds.add(q.id);
           if (!Array.isArray(q.options) || q.options.length < 3) {
             errors.push(`${concept.file}: "${id}" question "${q.id}" must have at least 3 options`);
           }

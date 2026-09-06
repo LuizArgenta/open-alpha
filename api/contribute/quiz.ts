@@ -33,6 +33,7 @@ interface QuizQuestion {
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   explanation: string;
   distractorRationale?: Record<string, string>;
+  distractorErrorCode?: Record<string, string>;
   difficultyTag?: 'easy' | 'medium' | 'hard';
   standardsCode?: string;
 }

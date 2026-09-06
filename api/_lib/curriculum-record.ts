@@ -65,10 +65,17 @@ function masteryCheckProblem(value: unknown): string | undefined {
 
   const questions = value.questions;
   if (!Array.isArray(questions)) return 'masteryCheck.questions is not an array';
+  const ids = new Set<string>();
 
   for (const [index, question] of questions.entries()) {
     const where = `masteryCheck.questions[${index}]`;
     if (!isObject(question)) return `${where} is not an object`;
+    // File/schema validation requires ids. Stored legacy rows may predate that
+    // rule, so record-level validation only rejects collisions when ids exist.
+    if (isNonEmptyString(question.id)) {
+      if (ids.has(question.id)) return `${where}.id "${question.id}" is duplicated`;
+      ids.add(question.id);
+    }
     if (!isNonEmptyString(question.question)) return `${where}.question is missing`;
 
     const options = question.options;
@@ -82,6 +89,26 @@ function masteryCheckProblem(value: unknown): string | undefined {
       // The one that would otherwise be invisible: a question nobody can pass.
       return `${where}.correctAnswer "${question.correctAnswer}" matches none of its options`;
     }
+
+    if (question.difficultyTag !== undefined &&
+        !['easy', 'medium', 'hard'].includes(String(question.difficultyTag))) {
+      return `${where}.difficultyTag is not easy, medium or hard`;
+    }
+    if (question.purpose !== undefined &&
+        !['practice', 'check', 'mastery', 'review'].includes(String(question.purpose))) {
+      return `${where}.purpose is not a known item purpose`;
+    }
+    for (const field of ['distractorRationale', 'distractorErrorCode'] as const) {
+      if (question[field] === undefined) continue;
+      if (!isObject(question[field])) return `${where}.${field} is not an object`;
+      const correctIndex = identifiedOptionIndex(question.correctAnswer, options);
+      for (const [answer, value] of Object.entries(question[field])) {
+        if (!isNonEmptyString(value)) return `${where}.${field}.${answer} is blank`;
+        const rationaleIndex = identifiedOptionIndex(answer, options);
+        if (rationaleIndex < 0) return `${where}.${field}.${answer} matches no option`;
+        if (rationaleIndex === correctIndex) return `${where}.${field} names the correct answer`;
+      }
+    }
   }
 
   return undefined;
@@ -94,11 +121,19 @@ function masteryCheckProblem(value: unknown): string | undefined {
  * two things, which makes the grading arbitrary.
  */
 function identifiesOneOption(correctAnswer: string, options: string[]): boolean {
-  const answer = correctAnswer.trim();
-  if (options.some(option => option.trim() === answer)) return true;
+  return identifiedOptionIndex(correctAnswer, options) >= 0;
+}
+
+function identifiedOptionIndex(answerValue: string, options: string[]): number {
+  const answer = answerValue.trim();
+  const exact = options.findIndex(option => option.trim() === answer);
+  if (exact >= 0) return exact;
 
   const label = (option: string) => option.trim().split(/[).:\-]/, 1)[0].trim();
-  return options.filter(option => label(option) === answer).length === 1;
+  const matches = options
+    .map((option, index) => ({ index, matches: label(option) === answer }))
+    .filter(candidate => candidate.matches);
+  return matches.length === 1 ? matches[0].index : -1;
 }
 
 function remediationProblem(value: unknown): string | undefined {

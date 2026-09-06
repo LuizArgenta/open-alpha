@@ -137,6 +137,21 @@ CREATE TABLE sessions (
 | POST | `/quiz` | Generate quiz questions |
 | POST | `/quiz/submit` | Submit quiz results |
 
+#### Assessment item bank
+
+An authored `masteryCheck.questions` array is a pool, not one fixed test. It
+contains at least five items; `/quiz` persists the complete pool and draws five
+mastery items uniformly for each attempt. Difficulty targeting, recent-item
+exclusion and exposure limits are intentionally a later layer.
+
+`assessment_items` is the immutable question snapshot. Internal pedagogical
+metadata lives on that same atomic row: difficulty, purpose, skill and
+reasoning tags, distractor rationales/error codes, content hash, version and
+lifecycle status. Changing an authored item under the same id creates a new snapshot and
+retires the previous version; attempts keep pointing to the exact item they
+showed. Neither the answer key nor pedagogical metadata is returned when a quiz
+opens.
+
 ### Parent Coach (`/api/coach`)
 
 | Method | Endpoint | Description |

@@ -144,7 +144,7 @@
 
           "masteryCheck": {
             "type": "object",
-            "description": "5-question mastery checkpoint. Learner must reach passingScore (default 80%) to mark concept as mastered.",
+            "description": "Mastery item pool. Five items are drawn for each checkpoint and the learner must reach passingScore (default 80%) to mark the concept as mastered.",
             "required": ["questions"],
             "properties": {
               "passingScore": {
@@ -157,7 +157,6 @@
               "questions": {
                 "type": "array",
                 "minItems": 5,
-                "maxItems": 5,
                 "items": {
                   "type": "object",
                   "required": ["id", "question", "options", "correctAnswer", "explanation"],
@@ -178,7 +177,28 @@
                     "explanation": {
                       "type": "string",
                       "description": "Why this answer is correct. Shown to learner after submitting."
-                    }
+                    },
+                    "difficultyTag": {
+                      "type": "string",
+                      "enum": ["easy", "medium", "hard"]
+                    },
+                    "purpose": {
+                      "type": "string",
+                      "enum": ["practice", "check", "mastery", "review"],
+                      "default": "mastery"
+                    },
+                    "skillTag": { "type": "string" },
+                    "reasoningType": { "type": "string" },
+                    "distractorRationale": {
+                      "type": "object",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "distractorErrorCode": {
+                      "type": "object",
+                      "description": "Stable misconception/error code for each wrong option.",
+                      "additionalProperties": { "type": "string" }
+                    },
+                    "pedagogicalRationale": { "type": "string" }
                   }
                 }
               }

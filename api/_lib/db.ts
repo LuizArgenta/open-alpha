@@ -1,4 +1,5 @@
 import { createClient } from '@libsql/client';
+import { createHash } from 'crypto';
 
 const client = createClient({
   url: process.env.TURSO_DATABASE_URL || 'file:local.db',
@@ -84,6 +85,117 @@ async function migrateGeneratedLessonsToPerLanguage(): Promise<void> {
     DROP TABLE generated_lessons;
     ALTER TABLE generated_lessons_per_language RENAME TO generated_lessons;
   `);
+}
+
+/**
+ * Adds the item-bank columns deliberately instead of feeding them through the
+ * legacy "ignore every ALTER error" loop. Unexpected migration failures must
+ * stop startup; otherwise an installation can appear healthy without hashes
+ * or versioned evidence.
+ */
+async function migrateAssessmentItemBank(): Promise<void> {
+  const definitions: Record<string, string> = {
+    difficulty_tag: "TEXT NOT NULL DEFAULT 'medium' CHECK (difficulty_tag IN ('easy', 'medium', 'hard'))",
+    purpose: "TEXT NOT NULL DEFAULT 'mastery' CHECK (purpose IN ('practice', 'check', 'mastery', 'review'))",
+    skill_tag: 'TEXT',
+    reasoning_type: 'TEXT',
+    distractor_rationale: "TEXT NOT NULL DEFAULT '{}'",
+    distractor_error_code: "TEXT NOT NULL DEFAULT '{}'",
+    pedagogical_rationale: 'TEXT',
+    content_hash: 'TEXT',
+    version: 'INTEGER NOT NULL DEFAULT 1',
+    status: "TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired'))",
+  };
+
+  const columns = await client.execute('PRAGMA table_info(assessment_items)');
+  const existing = new Set(columns.rows.map(row => String(row.name)));
+  let migratedLegacyRows = false;
+  for (const [name, definition] of Object.entries(definitions)) {
+    if (!existing.has(name)) {
+      await client.execute(`ALTER TABLE assessment_items ADD COLUMN ${name} ${definition}`);
+      migratedLegacyRows = true;
+    }
+  }
+
+  const rows = await client.execute(`
+    SELECT id, subject_id, concept_id, language, authored_id, stem, options,
+           correct_answer, explanation
+    FROM assessment_items
+    WHERE content_hash IS NULL
+    ORDER BY subject_id, concept_id, language, authored_id, id
+  `);
+  if (rows.rows.length > 0) migratedLegacyRows = true;
+  for (const row of rows.rows) {
+    let version = 1;
+    if (row.authored_id !== null) {
+      const prior = await client.execute({
+        sql: `SELECT COALESCE(MAX(version), 0) AS version FROM assessment_items
+              WHERE subject_id = ? AND concept_id = ? AND language = ?
+                AND authored_id = ? AND content_hash IS NOT NULL`,
+        args: [row.subject_id as string, row.concept_id as string,
+          row.language as string, row.authored_id as string],
+      });
+      version = Number(prior.rows[0]?.version ?? 0) + 1;
+    }
+    let options: unknown = row.options;
+    try {
+      options = JSON.parse(String(row.options));
+    } catch {
+      // Preserve even malformed historical evidence with a deterministic hash.
+    }
+    const contentHash = createHash('sha256').update(JSON.stringify({
+      question: row.stem,
+      options,
+      correctAnswer: row.correct_answer,
+      explanation: row.explanation ?? null,
+      difficultyTag: 'medium',
+      purpose: 'mastery',
+      skillTag: null,
+      reasoningType: null,
+      distractorRationale: {},
+      distractorErrorCode: {},
+      pedagogicalRationale: null,
+    })).digest('hex');
+    await client.execute({
+      sql: 'UPDATE assessment_items SET content_hash = ?, version = ? WHERE id = ?',
+      args: [contentHash, version, row.id as number],
+    });
+  }
+
+  // If a legacy database somehow has repeated authored ids, preserve every
+  // historical row but expose only the newest as the active bank item.
+  if (migratedLegacyRows) {
+    await client.execute(`
+      UPDATE assessment_items SET status = 'retired'
+      WHERE authored_id IS NOT NULL AND id NOT IN (
+        SELECT MAX(id) FROM assessment_items
+        WHERE authored_id IS NOT NULL
+        GROUP BY subject_id, concept_id, language, authored_id
+      )
+    `);
+  }
+  await client.execute(`CREATE INDEX IF NOT EXISTS assessment_item_pool
+    ON assessment_items(subject_id, concept_id, language, status, purpose)`);
+  await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS assessment_item_authored_version
+    ON assessment_items(subject_id, concept_id, language, authored_id, version)
+    WHERE authored_id IS NOT NULL`);
+
+  // Early development builds used this name for a UNIQUE hash index. That
+  // rejected legitimate, identical legacy snapshots with different versions.
+  // Replace only that obsolete variant so the migration remains safe to rerun.
+  const indexes = await client.execute('PRAGMA index_list(assessment_items)');
+  const obsoleteUniqueHashIndex = indexes.rows.some(row =>
+    String(row.name) === 'assessment_item_authored_hash' && Number(row.unique) === 1
+  );
+  if (obsoleteUniqueHashIndex) {
+    await client.execute('DROP INDEX assessment_item_authored_hash');
+  }
+  await client.execute(`CREATE INDEX IF NOT EXISTS assessment_item_authored_hash
+    ON assessment_items(subject_id, concept_id, language, authored_id, content_hash)
+    WHERE authored_id IS NOT NULL AND content_hash IS NOT NULL`);
+  await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS assessment_item_active_authored
+    ON assessment_items(subject_id, concept_id, language, authored_id)
+    WHERE authored_id IS NOT NULL AND status = 'active'`);
 }
 
 /**
@@ -357,6 +469,16 @@ export async function initializeSchema(): Promise<void> {
       options TEXT NOT NULL,
       correct_answer TEXT NOT NULL,
       explanation TEXT,
+      difficulty_tag TEXT NOT NULL DEFAULT 'medium' CHECK (difficulty_tag IN ('easy', 'medium', 'hard')),
+      purpose TEXT NOT NULL DEFAULT 'mastery' CHECK (purpose IN ('practice', 'check', 'mastery', 'review')),
+      skill_tag TEXT,
+      reasoning_type TEXT,
+      distractor_rationale TEXT NOT NULL DEFAULT '{}',
+      distractor_error_code TEXT NOT NULL DEFAULT '{}',
+      pedagogical_rationale TEXT,
+      content_hash TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired')),
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -639,6 +761,8 @@ export async function initializeSchema(): Promise<void> {
       // Column already exists — safe to ignore
     }
   }
+
+  await migrateAssessmentItemBank();
 
   // Multi-step and not idempotent by accident, so it guards itself rather than
   // relying on the swallowed errors above.

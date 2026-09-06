@@ -187,20 +187,22 @@ describe('answers cannot be replayed or smuggled', () => {
   });
 
   it('refuses an item that belongs to a different attempt', async () => {
-    const first = await openQuiz();
     const second = await openQuiz();
+    const foreign = await executeSql<{ id: number }>(
+      `INSERT INTO assessment_items
+         (subject_id, concept_id, language, source, stem, options, correct_answer)
+       VALUES ($1, $2, 'en', 'generated', 'Foreign item', '["A","B"]', 'A')
+       RETURNING id`,
+      [SUBJECT, CONCEPT]
+    );
 
     const response = await post(answerQuiz, '/api/tutor/quiz/answer', {
       attemptId: second.attemptId,
-      itemId: first.questions[0].itemId,
+      itemId: foreign.rows[0].id,
       chosen: 'A',
     });
 
-    // Generated items are per-attempt; authored ones are shared, so this only
-    // asserts the check exists for items outside the attempt.
-    if (first.questions[0].itemId !== second.questions[0].itemId) {
-      expect(response.status).toBe(400);
-    }
+    expect(response.status).toBe(400);
   });
 
   it('refuses an item that does not exist', async () => {
