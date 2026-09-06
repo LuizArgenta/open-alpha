@@ -5,14 +5,32 @@ on:
   push:
     branches: [main]
 
+# A workflow that only reads the code needs a token that can only read it.
+# Without this the job runs with whatever the repository's default happens to
+# be, which for many repositories is write — so any compromised step, or any
+# dependency executing during `npm ci`, inherits the ability to push.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned by commit SHA, not by tag: a tag is mutable, so
+      # `@v4` means "whatever the owner points v4 at today" — which is a
+      # write-access-to-CI supply chain away from arbitrary code in this job.
+      # The version each SHA corresponds to is in the comment, and Dependabot
+      # keeps both in step (see .github/dependabot.yml); pinning without that
+      # would just freeze known-vulnerable versions in place.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The checkout step otherwise leaves the job's token in
+          # .git/config, where every later step can read it. Nothing here
+          # pushes, so nothing here needs it to persist.
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm

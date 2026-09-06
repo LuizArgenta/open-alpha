@@ -1,0 +1,45 @@
+version: 2
+
+# Pinning actions by SHA (see ci.yml) trades one risk for another: the job can
+# no longer be changed under us, but it also stops receiving fixes. Dependabot
+# is the other half of that trade — it raises the pin *and* the version comment
+# together, so the pin stays current instead of quietly ageing.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  # One npm entry per workspace: the root manifest does not list the
+  # frontend's or backend's dependencies, so a single root entry would leave
+  # both unwatched.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps arrive as one PR rather than a dozen; a major
+      # is worth reading on its own.
+      routine:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      routine:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      routine:
+        update-types: [minor, patch]
