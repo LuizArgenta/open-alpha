@@ -1,3 +1,4 @@
+import { parseDbTimestamp } from './time.js';
 /**
  * Why a mastery check was failed.
  *
@@ -69,8 +70,8 @@ export interface Diagnosis {
 function countLongGaps(answers: AnswerEvent[]): number {
   let gaps = 0;
   for (let i = 1; i < answers.length; i++) {
-    const previous = new Date(answers[i - 1].at).getTime();
-    const current = new Date(answers[i].at).getTime();
+    const previous = parseDbTimestamp(answers[i - 1].at).getTime();
+    const current = parseDbTimestamp(answers[i].at).getTime();
     if (current - previous >= WALKED_AWAY_MS) gaps++;
   }
   return gaps;
