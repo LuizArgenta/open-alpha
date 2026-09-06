@@ -2,8 +2,8 @@ import { executeSql } from '../_lib/db.js';
 import { ITEMS_PER_MASTERY_ATTEMPT as ITEMS_PER_ATTEMPT } from '../_lib/item-bank.js';
 import { LlmUnavailableError, unavailableResponse } from '../_lib/llm-budget.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
-import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage, generateQuizQuestions } from '../_lib/llm.js';
-import { questionProblem } from '../_lib/curriculum-record.js';
+import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage } from '../_lib/llm.js';
+import { generateServableQuiz } from '../_lib/generated-quiz.js';
 import { recordEvent } from '../_lib/events.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
 import { drawFromAuthoredItemBank, type AttemptQuestion, openAttempt, withoutAnswerKey } from '../_lib/assessment.js';
@@ -109,29 +109,6 @@ export async function POST(request: Request) {
       : undefined;
 
     const missing = ITEMS_PER_ATTEMPT - authoredItems.length;
-    const quizJson = await generateQuizQuestions(
-      subject,
-      concept.name,
-      userResult.rows[0].grade_level,
-      missing,
-      interests,
-      recentAccuracy,
-      language
-    );
-
-    // Extract JSON from markdown code blocks if present
-    let jsonStr = quizJson;
-    const jsonMatch = quizJson.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1].trim();
-    }
-
-    const quiz = JSON.parse(jsonStr) as { questions?: AttemptQuestion[] };
-    const questions = quiz.questions ?? [];
-
-    if (questions.length === 0) {
-      return Response.json({ error: 'Failed to generate quiz' }, { status: 500 });
-    }
 
     /**
      * Generated questions used to reach the student with no checking at all —
@@ -140,25 +117,29 @@ export async function POST(request: Request) {
      * is 6% of the curriculum; the model's output, which is the other 94%,
      * went unchecked.
      *
-     * An item whose correctAnswer matches none of its options is failed by
-     * every student forever, and the engine reads that as a knowledge gap and
-     * sends them back to a prerequisite they already know. Refusing the quiz
-     * is worse than serving a good one and better than serving that.
+     * It now checks, retries once, and distinguishes what it refuses from what
+     * it repairs — see `generated-quiz.ts`. An unanswerable item refuses the
+     * quiz; a missing distractor map degrades it and says so.
      */
-    const rejected = questions
-      .map((question, index) => questionProblem(
-        question as unknown as Record<string, unknown>,
-        `generated[${index}]`
-      ))
-      .filter((problem): problem is string => problem !== undefined);
+    const generated = await generateServableQuiz({
+      subject,
+      conceptName: concept.name,
+      gradeLevel: userResult.rows[0].grade_level,
+      count: missing,
+      interests,
+      recentAccuracy,
+      language,
+    });
 
-    if (rejected.length > 0) {
-      console.error('Rejected generated quiz:', rejected.join('; '));
+    if ('problems' in generated) {
+      console.error('Rejected generated quiz:', generated.problems.join('; '));
       return Response.json(
         { error: 'The generated quiz did not pass validation. Please try again.' },
         { status: 502 }
       );
     }
+
+    const questions = generated.questions;
 
     /**
      * Authored items arrive already stored, so `storeItem` short-circuits on
@@ -183,6 +164,11 @@ export async function POST(request: Request) {
         source: authoredItems.length > 0 ? 'mixed' : 'generated',
         items: items.length,
         authored: authoredItems.length,
+        // Degraded is acceptable; degraded and unmeasured is not. This is the
+        // denominator for "how often does generation omit pedagogical
+        // metadata", and it is here rather than in a log because a log nobody
+        // queries is the silent fallback with extra steps.
+        generation: generated.quality,
       },
     });
 

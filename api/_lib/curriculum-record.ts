@@ -96,51 +96,95 @@ function masteryCheckProblem(value: unknown): string | undefined {
  * curriculum. The other 94% went unchecked.
  */
 export function questionProblem(question: Record<string, unknown>, where: string): string | undefined {
-  {
-    if (!isNonEmptyString(question.question)) return `${where}.question is missing`;
+  return answerabilityProblem(question, where)
+    ?? metadataProblems(question, where)[0]?.problem;
+}
 
-    const options = question.options;
-    if (!Array.isArray(options) || options.length < 2) {
-      return `${where}.options needs at least two choices`;
-    }
-    if (!options.every(isNonEmptyString)) return `${where}.options contains a blank choice`;
+/**
+ * The half a student can feel: is this item answerable at all.
+ *
+ * Separated from the metadata check because the two failures deserve opposite
+ * responses on the generated path. An unanswerable item cannot be served —
+ * there is no version of it that is safe in front of a learner. A missing or
+ * half-filled `distractorErrorCode` costs a diagnosis, not a quiz, and
+ * `tutor/quiz.ts` repairs that rather than refusing the session. On a stored
+ * record, both are still defects, and `questionProblem` reports both.
+ */
+export function answerabilityProblem(question: Record<string, unknown>, where: string): string | undefined {
+  if (!isNonEmptyString(question.question)) return `${where}.question is missing`;
 
-    if (!isNonEmptyString(question.correctAnswer)) return `${where}.correctAnswer is missing`;
-    if (!identifiesOneOption(question.correctAnswer, options)) {
-      // The one that would otherwise be invisible: a question nobody can pass.
-      return `${where}.correctAnswer "${question.correctAnswer}" matches none of its options`;
-    }
+  const options = question.options;
+  if (!Array.isArray(options) || options.length < 2) {
+    return `${where}.options needs at least two choices`;
+  }
+  if (!options.every(isNonEmptyString)) return `${where}.options contains a blank choice`;
 
-    if (question.difficultyTag !== undefined &&
-        !['easy', 'medium', 'hard'].includes(String(question.difficultyTag))) {
-      return `${where}.difficultyTag is not easy, medium or hard`;
-    }
-    if (question.purpose !== undefined &&
-        !['practice', 'check', 'mastery', 'review'].includes(String(question.purpose))) {
-      return `${where}.purpose is not a known item purpose`;
-    }
-    for (const field of ['distractorRationale', 'distractorErrorCode'] as const) {
-      if (question[field] === undefined) continue;
-      if (!isObject(question[field])) return `${where}.${field} is not an object`;
-      const correctIndex = identifiedOptionIndex(question.correctAnswer, options);
-      for (const [answer, value] of Object.entries(question[field])) {
-        if (!isNonEmptyString(value)) return `${where}.${field}.${answer} is blank`;
-        const rationaleIndex = identifiedOptionIndex(answer, options);
-        if (rationaleIndex < 0) return `${where}.${field}.${answer} matches no option`;
-        if (rationaleIndex === correctIndex) return `${where}.${field} names the correct answer`;
-      }
+  if (!isNonEmptyString(question.correctAnswer)) return `${where}.correctAnswer is missing`;
+  if (!identifiesOneOption(question.correctAnswer, options)) {
+    // The one that would otherwise be invisible: a question nobody can pass.
+    return `${where}.correctAnswer "${question.correctAnswer}" matches none of its options`;
+  }
 
-      // Partial coverage is worse than none: a diagnosis that reads error
-      // codes would silently treat "no code recorded" as "no shared cause",
-      // so three mistakes from one misunderstanding could look like three
-      // unrelated ones. Absent is honest; half-filled lies.
-      if (Object.keys(question[field] as object).length !== options.length - 1) {
-        return `${where}.${field} covers ${Object.keys(question[field] as object).length} of ${options.length - 1} distractors`;
-      }
-    }
+  if (question.difficultyTag !== undefined &&
+      !['easy', 'medium', 'hard'].includes(String(question.difficultyTag))) {
+    return `${where}.difficultyTag is not easy, medium or hard`;
+  }
+  if (question.purpose !== undefined &&
+      !['practice', 'check', 'mastery', 'review'].includes(String(question.purpose))) {
+    return `${where}.purpose is not a known item purpose`;
   }
 
   return undefined;
+}
+
+/** The distractor maps the diagnosis reads, one entry per field that is wrong. */
+export const DISTRACTOR_FIELDS = ['distractorRationale', 'distractorErrorCode'] as const;
+
+export type DistractorField = typeof DISTRACTOR_FIELDS[number];
+
+/**
+ * Checks the maps that name *why* a wrong option is wrong.
+ *
+ * Reported per field so a caller can discard one and keep the other: a
+ * complete `distractorErrorCode` is still worth having when the rationales
+ * came back half-written.
+ */
+export function metadataProblems(
+  question: Record<string, unknown>,
+  where: string
+): Array<{ field: DistractorField; problem: string }> {
+  const found: Array<{ field: DistractorField; problem: string }> = [];
+  const options = question.options;
+  if (!Array.isArray(options) || !options.every(isNonEmptyString)) return found;
+  if (!isNonEmptyString(question.correctAnswer)) return found;
+
+  for (const field of DISTRACTOR_FIELDS) {
+    const value = question[field];
+    if (value === undefined) continue;
+    const fail = (problem: string) => { found.push({ field, problem }); };
+
+    if (!isObject(value)) { fail(`${where}.${field} is not an object`); continue; }
+
+    const correctIndex = identifiedOptionIndex(question.correctAnswer, options);
+    let problem: string | undefined;
+    for (const [answer, entry] of Object.entries(value)) {
+      if (!isNonEmptyString(entry)) { problem = `${where}.${field}.${answer} is blank`; break; }
+      const rationaleIndex = identifiedOptionIndex(answer, options);
+      if (rationaleIndex < 0) { problem = `${where}.${field}.${answer} matches no option`; break; }
+      if (rationaleIndex === correctIndex) { problem = `${where}.${field} names the correct answer`; break; }
+    }
+    if (problem) { fail(problem); continue; }
+
+    // Partial coverage is worse than none: a diagnosis that reads error
+    // codes would silently treat "no code recorded" as "no shared cause",
+    // so three mistakes from one misunderstanding could look like three
+    // unrelated ones. Absent is honest; half-filled lies.
+    if (Object.keys(value).length !== options.length - 1) {
+      fail(`${where}.${field} covers ${Object.keys(value).length} of ${options.length - 1} distractors`);
+    }
+  }
+
+  return found;
 }
 
 /**
