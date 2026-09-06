@@ -135,6 +135,10 @@ export default function Signup() {
               Already have an account?{' '}
               <Link to="/login">Sign in</Link>
             </p>
+
+            <p style={{ textAlign: 'center', fontSize: '0.8125rem', color: 'var(--text-light)', marginTop: '0.75rem' }}>
+              <Link to="/data">What this stores about you</Link>
+            </p>
           </>
         )}
 

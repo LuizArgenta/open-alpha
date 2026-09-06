@@ -315,6 +315,30 @@ async function migrateAuthAttempts(): Promise<void> {
 }
 
 /**
+ * The table the model budget counts in, and the index it counts with — the
+ * query only ever asks about the last day, so without it every check scans
+ * every call ever made.
+ *
+ * Numbered 007 to leave 006 for the auth_attempts migration in the open
+ * rate-limiting PR; ids are strings and run in array order, so a gap costs
+ * nothing and a collision would cost a merge conflict.
+ */
+async function migrateLlmUsage(): Promise<void> {
+  await client.execute(`CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purpose TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  await client.execute(`CREATE INDEX IF NOT EXISTS llm_usage_window
+    ON llm_usage(created_at)`);
+}
+
+/**
  * Ties an XP award to the attempt that earned it.
  *
  * Without the column, "one award per attempt" is only as strong as the code
@@ -780,6 +804,17 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- What model calls cost, so a deployment can hold a ceiling.
+    CREATE TABLE IF NOT EXISTS llm_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purpose TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Guest sessions for demo mode (no account required)
     CREATE TABLE IF NOT EXISTS guest_sessions (
       id TEXT PRIMARY KEY,
@@ -987,6 +1022,7 @@ export async function initializeSchema(): Promise<void> {
     { id: '004-assessment-responses-unique', run: ensureAssessmentResponsesUniqueConstraint },
     { id: '005-xp-awards-attempt-id', run: migrateXpAwardsAttemptId },
     { id: '006-auth-attempts', run: migrateAuthAttempts },
+    { id: '007-llm-usage', run: migrateLlmUsage },
   ]);
 }
 

@@ -37,3 +37,7 @@ backend/data/
 local.db
 tests/.tmp-test.db
 .vercel
+
+# Snapshots do banco (npm run backup)
+backups/
+*.db.replaced-*

@@ -11,6 +11,7 @@ import { executeSql, initializeSchema } from '../../api/_lib/db.js';
 /** Children before parents: anything referencing users is deleted first. */
 const TABLES_IN_DEPENDENCY_ORDER = [
   'auth_attempts',
+  'llm_usage',
   'assessment_responses',
   'assessment_attempt_items',
   // Before assessment_attempts: an XP award now names the attempt that earned

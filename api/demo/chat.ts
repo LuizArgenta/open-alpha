@@ -23,6 +23,7 @@
  */
 
 import { executeSql } from '../_lib/db.js';
+import { LlmUnavailableError, demoModeIsEnabled, unavailableResponse } from '../_lib/llm-budget.js';
 import { chatWithTutor, ChatMessage, TutorContext } from '../_lib/llm.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
 import { rateLimitKey } from '../_lib/rate-limit.js';
@@ -57,6 +58,17 @@ interface DemoSession {
 export async function POST(request: Request) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  // Anonymous, unauthenticated, and it calls a model: the largest cost and
+  // abuse surface this deployment has, and the least necessary during a closed
+  // test. Switchable on its own, so turning it off does not take the tutor
+  // away from the people actually testing.
+  if (!demoModeIsEnabled()) {
+    return Response.json(
+      { error: 'Demo mode is switched off on this deployment.' },
+      { status: 503, headers: CORS_HEADERS }
+    );
   }
 
   try {
@@ -217,6 +229,9 @@ export async function POST(request: Request) {
       { headers: CORS_HEADERS }
     );
   } catch (error) {
+    // A refused model call is not a server fault: say which limit was hit
+    // so the interface can tell a budget from an outage.
+    if (error instanceof LlmUnavailableError) return unavailableResponse(error);
     console.error('Demo chat error:', error);
     return Response.json(
       { error: 'Failed to chat with tutor' },

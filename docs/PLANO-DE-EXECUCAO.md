@@ -4,13 +4,13 @@ Quadro de acompanhamento do que falta para o Open Alpha ser usável de verdade p
 
 **Como manter:** marque a caixa quando o PR for **mergeado**, não quando for aberto, e anote o número do PR ao lado. Se um item se revelar desnecessário ou mudar de forma, edite a linha e diga por quê — um item riscado sem explicação vira dúvida daqui a três meses.
 
-Documentos relacionados: [PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md) · [PRD v2 — evidência, autoria e motivação](./PRD-plataforma-de-aprendizagem.md)
+Documentos relacionados: [PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md) · [PRD v2 — evidência, autoria e motivação](./PRD-plataforma-de-aprendizagem.md) · [Plano de deploy para teste](./PLANO-DEPLOY-TESTE.md)
 
 ---
 
 ## Onde estamos
 
-*Atualizado em 5 de setembro de 2026.*
+*Atualizado em 6 de setembro de 2026.*
 
 Mergeado em `main` (PRs #1 a #19): motor de decisão com volta ao pré-requisito, revisão espaçada, diagnóstico do tipo de erro, medidor de foco contestável, validação de lição gerada, alertas ao responsável, XP ligado a prova de aprendizagem, evidência de avaliação, log de decisões, linha do tempo, override humano, nivelamento, currículo no banco, autoria de matérias e árvores, pt-BR como padrão e CI.
 
@@ -20,7 +20,7 @@ Da segunda auditoria, já mergeados: [#28](https://github.com/LuizArgenta/open-a
 
 [#32](https://github.com/LuizArgenta/open-alpha/pull/32) trouxe o banco de itens (item 19) e o núcleo do item 10; auditado no próprio PR antes de mesclar, com o conflito em `db.ts` resolvido preservando as três migrações. [#34](https://github.com/LuizArgenta/open-alpha/pull/34) fechou o item 11 e a API de transação com callback que os itens 9 e 11 precisavam, [#35](https://github.com/LuizArgenta/open-alpha/pull/35) fechou o item 9 — de quebra, tapando uma exposição a `SQLITE_BUSY` que existia desde o PR #22 — [#36](https://github.com/LuizArgenta/open-alpha/pull/36) fechou o item 10 e [#37](https://github.com/LuizArgenta/open-alpha/pull/37) fechou o item 12 — **com isso a metade de integridade do Marco 1 (itens 1 a 12) está inteira** — [#38](https://github.com/LuizArgenta/open-alpha/pull/38) endureceu a cadeia de build (item 18, metade que sai por PR) e [#39](https://github.com/LuizArgenta/open-alpha/pull/39) fechou a varredura de IDOR (item 16).
 
-**300 testes** em `main` (o #40 ainda não mesclado), contra 160 quando este plano foi escrito.
+**323 testes** em `main`, contra 160 quando este plano foi escrito.
 
 **Cobertura de conteúdo autorado, medida e não estimada:** dos **141 conceitos**, apenas **9** têm `masteryCheck`. Todos os 9 têm `id` estável e ≥5 itens, então o banco de itens do #32 não regride nada — mas quer dizer que os itens 19 a 21 valem hoje para **6% do currículo**. Os outros 94% caem na geração por LLM. Nenhum algoritmo de seleção conserta isso; é trabalho de autoria, e está registrado em "Fora de PR".
 
@@ -97,18 +97,22 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
 
 ## Marco 3 — Operação com vários alunos
 
-- [ ] **25. LGPD e proteção de menores** *(G)* — retenção por categoria, exportação, exclusão, aviso de privacidade em linguagem infantil e adulta, RIPD. **Não pode ser posterior num produto para menores.** Dividir em entregas técnicas menores (retenção, exportação, exclusão, aviso) em vez de um PR só; a revisão jurídica em si fica fora de PR (ver "Fora de PR").
+- [ ] **25. LGPD e proteção de menores** *(G)* — **parcial: o aviso saiu, as outras três entregas não.** Dividido em quatro entregas técnicas (retenção, exportação, exclusão, aviso), como este item já pedia; a revisão jurídica em si fica fora de PR (ver "Fora de PR").
+  - [x] **Aviso** — [PR #44](https://github.com/LuizArgenta/open-alpha/pull/44). Página `/data` dizendo tabela por tabela o que fica guardado e por quê, mais as duas coisas que um aviso costuma enterrar: **o sistema forma juízos sobre a pessoa** ("estava chutando", "tinha parado de prestar atenção") e **as conversas saem daqui para um provedor de modelo**. A lista é *dado*, não prosa, e `tests/data-notice.test.ts` a confronta com o schema real: tabela nova reprova o teste até alguém decidir se ela guarda algo sobre uma pessoa. Um aviso que envelhece calado é pior que nenhum — é uma promessa que ninguém está cumprindo, e a pessoa para quem foi escrito não tem como saber. Também diz o que **não** existe: sem exportação, sem exclusão automática, sem prazo de retenção.
+  - [ ] **Retenção por categoria**, **exportação** e **exclusão** — continuam pendentes, e o aviso admite isso em vez de omitir. As três precisam existir antes de qualquer uso por quem não seja adulto consentindo.
+  - [ ] **Linguagem infantil** — o aviso atual é para adulto. A versão para criança é outra escrita, não uma tradução.
+  - [ ] **RIPD** — fora de PR, depende da revisão jurídica.
 - [ ] **26. Log de auditoria append-only** *(M)* — logins, mudanças de papel, publicações e acessos administrativos a dados infantis.
 - [ ] **27. Console de Guide** *(G)* — fila de intervenções priorizadas, histórico, notas privadas, acordos com o aluno, separação entre observação e inferência algorítmica.
 - [ ] **28. Turmas, grupos e matrículas** *(M)* — uma escola não é um conjunto de famílias avulsas.
 - [ ] **29. Painel do responsável completo** *(M)* — metas, limites de uso, exportação, controle de compartilhamento.
 - [ ] **30. Telemetria e observabilidade** *(M)* — schema único de eventos, painel de saúde, alerta de backup vencido.
-- [ ] **31. Backup e restauração testados** *(M)* — inclui teste de recuperação, não só de geração. **Antecipar para antes do piloto local** (ver Sequência recomendada), junto do item 33 — não é algo que se instala depois que já há aluno usando o sistema.
+- [x] **31. Backup e restauração testados** *(M)* — [PR #42](https://github.com/LuizArgenta/open-alpha/pull/42). `npm run backup` e `npm run restore`, sobre `VACUUM INTO` — cópia consistente enquanto outras conexões leem, que `cp` não dá. **A metade que costuma faltar é a que este item pedia:** todo snapshot é *aberto e inspecionado* antes do comando dizer que deu certo, e o restore confere o arquivo **antes** de mexer em qualquer coisa; um restore que instala arquivo ilegível transforma uma queda recuperável em irrecuperável. O banco substituído é renomeado, não apagado — restaurar é quando menos se pode pagar um segundo erro. Recusa banco remoto em vez de fingir: um Turso remoto não é nosso para copiar com consistência, e ele tem backup próprio. 14 testes, incluindo o ciclo perda→restauração; verificado também pelos comandos reais contra o schema de verdade, não só pela biblioteca.
 
 ## Marco 4 — Plataforma equivalente
 
 - [ ] **32. API versionada, OpenAPI, erros padronizados** *(M)* — o VISION.md promete "API-first" desde o início.
-- [ ] **33. Distribuição local** *(G)* — Docker reproduzível, modo offline, LLM local por API compatível, chave de bloqueio de tráfego externo. **Antecipar para antes do piloto local**, junto do item 31.
+- [ ] **33. Distribuição local** *(G)* — Docker reproduzível, modo offline, LLM local por API compatível, chave de bloqueio de tráfego externo. **Antecipar para antes do piloto local**, junto do item 31. **Primeira metade feita** em [PR #41](https://github.com/LuizArgenta/open-alpha/pull/41): `Dockerfile`, servidor que roda os handlers de `api/` fora da Vercel, SQLite em volume, validação de ambiente no boot. Falta modo offline e LLM local — ver [plano de deploy](./PLANO-DEPLOY-TESTE.md).
 - [ ] **34. Padrões 1EdTech** *(G)* — OneRoster, CASE, QTI, Caliper.
 - [ ] **35. Aplicativos por matéria** *(XG)* — editor matemático com rascunho e passos, leitor com fluência, editor de texto com rubricas, simulações. **É aqui que mora a diferença real para a Alpha, e cada matéria é praticamente um produto.**
 
@@ -139,7 +143,7 @@ Precisam de alguém que não é o time de engenharia:
    8. **12** — migrações versionadas, consolidando as quatro que existiam. ✅ PR #37. **Fecha a metade de integridade do Marco 1.**
 3. **Depois, segurança de custo baixo e risco alto:** 17 (✅ PR #28) → 18 (parcial, PR #38 — o resto é configuração do repositório) → 16 (✅ PR #39) → 13a (PR #40, aberto) → 13b (Argon2id).
 4. **Sessão:** 14, depois **isolado** o 15 (cookie HttpOnly + CSRF), por tocar toda chamada autenticada.
-5. **Antes do piloto local, não depois:** 33 (distribuição local reproduzível) e 31 (backup e restauração testados) — instalar isso depois que já há aluno usando o sistema é tarde demais.
+5. **Antes do piloto local, não depois:** 33 (distribuição local reproduzível — primeira metade no PR #41) e 31 (✅ PR #42) — instalar isso depois que já há aluno usando o sistema é tarde demais.
 6. **LGPD (25) não espera** — corre em paralelo às entregas técnicas acima, dividida em pedaços pequenos; a revisão jurídica em si segue fora de PR.
 7. **Barato e fora de ordem, mas com o maior retorno pedagógico por linha:** ligar `distractor_error_code` ao diagnóstico (ver "O que apareceu no caminho"). Depende só do #32, não dos itens 9 a 12.
 8. **Só então** 20, 21, 23, 24 (seleção e algoritmos adaptativos) — e o 20 só rende depois de haver pool de itens de verdade, o que é autoria, não código.
@@ -159,7 +163,7 @@ Chamar isto de substituto local acadêmico exige, da auditoria original e da com
 - [ ] Atividades escolhidas por domínio e incerteza
 - [ ] Funciona sem dependência obrigatória de nuvem *(item 33)*
 - [ ] Responsáveis podem supervisionar, contestar e excluir dados
-- [ ] Backup e restauração testados *(item 31, antes do piloto)*
+- [x] Backup e restauração testados *(item 31, PR #42 — geração e recuperação)*
 - [ ] Auditoria e resposta a incidentes *(item 26)*
 - [x] Autorização verificada em todo endpoint relevante *(item 16, PR #39 — varredura não achou falha; o que faltava era o teste que prova)*
 - [ ] CI, análise de dependências e proteção de segredos ativos *(item 18)*
@@ -177,6 +181,14 @@ Coisas que a auditoria não listou e que o trabalho dos PRs #22–#26 revelou. R
 - **Prova impossível de passar.** Um item cuja `correctAnswer` não corresponde a nenhuma opção renderiza normalmente e reprova todo aluno, sempre — e o motor lê isso como lacuna e manda o aluno de volta a um pré-requisito que ele já domina. Agora é rejeitado na leitura (#24), mas **os itens gerados por LLM entram pelo mesmo caminho**: vale checar quantos já existem no banco.
 - **Conceito atribuído pelo cliente no nivelamento** (#26). Mesma família do #20, em endpoint diferente. Sugere varrer os outros endpoints que aceitam identificador vindo do navegador — é o item 16.
 - **`executeSql` liga parâmetros por ordem de aparição, não pelo número do `$N`.** Um placeholder repetido consome um argumento a menos e escreve na coluna errada sem falhar. Já mordeu duas vezes. Confirmado por uma segunda auditoria lendo `db.ts` linha a linha — **virou item formal, o 7**, com critérios de aceite específicos.
+- **Não havia nada entre as chamadas de modelo e a fatura.** 94% do currículo gera lição e prova sob demanda, e o `demo/chat.ts` faz isso para qualquer um com a URL, sem conta. Fechado no [PR #43](https://github.com/LuizArgenta/open-alpha/pull/43): teto de tokens por janela contado no banco, chave de desligamento (`LLM_ENABLED=false`), interruptor separado para o modo demo, e as cinco chamadas de modelo passando por um estrangulamento único — teto que um endpoint novo pode esquecer de consultar é teto que um endpoint novo vai esquecer de consultar.
+
+- **Um teste deixava mobília no banco compartilhado.** Todos os arquivos de teste dividem o mesmo banco de rascunho, e `sql-param-binding.test.ts` criava uma tabela `sql_binding_probe` que nunca apagava. Ninguém notou porque nada olhava o schema inteiro — até o teste do aviso de dados olhar, e encontrar uma tabela de teste se passando por parte do produto. Corrigido no #44; o padrão vale de lição: teste que cria estrutura no banco compartilhado limpa depois de si.
+
+- **Uma corrida entre responder e finalizar a prova.** Encontrada por uma auditoria externa em 6 de setembro e confirmada no código: `answer` conferia que a tentativa estava aberta e só inseria três idas ao banco depois, enquanto `submit` lia as respostas, decidia e *então* fechava a tentativa. Uma resposta que passasse pela conferência antes de o `submit` ler chegava depois de a nota estar gravada — a linha ficava na tabela, sem entrar em nada. Um aluno que acertou 5 de 5 era registrado com 80%. Isso quebra a invariante em que todo o resto se apoia: **a nota tem que ser reconstruível a partir das evidências guardadas**. Fechado no [PR #46](https://github.com/LuizArgenta/open-alpha/pull/46). A auditoria viu metade: corrigir só o `answer` deixava a invariante quebrada, porque a janela de leitura do `submit` é independente — a decisão inteira teve que passar para depois da reivindicação da tentativa.
+
+- **Escrita nua contra transação dá `SQLITE_BUSY`.** Apareceu ao corrigir a corrida acima: com o `submit` segurando o lock por mais tempo, a inserção do `answer` — um `executeSql` solto, fora da fila de escrita — passou a colidir. A correção do `submit` sozinha teria trocado um bug silencioso por um 500. As escritas do caminho de avaliação agora passam pela fila; sobram quatro `executeSql` de escrita em fluxos não relacionados (`interests`, `grant-role`, `atxp-callback`), de risco prático baixo mas da mesma classe.
+
 - **Confiança do domínio ainda é 1.0 para prova e 0.6 para nivelamento, fixos.** É o item 23, e continua certo adiar até haver aluno real — mas o campo já existe e já é lido, então o dia em que houver dado ele está pronto.
 
 Da segunda auditoria, mais três achados que não viram item numerado por serem P1 (não bloqueiam aluno real sozinhos, mas valem registro para não se perderem):
