@@ -100,10 +100,14 @@ describe('the frontend and the api agree on what exists', () => {
    *
    * Pinned rather than hidden: this test fails if the gap grows, and fails
    * again once it is closed and this entry goes stale.
+   *
+   * It went stale as designed. /api/progress/gamification is answered now, so
+   * the list is empty — and an empty list is the stronger assertion, because
+   * it means the next endpoint the frontend invents has nowhere to hide.
    */
-  const KNOWN_MISSING = ['/api/progress/gamification'];
+  const KNOWN_MISSING: string[] = [];
 
-  it('serves every endpoint the frontend calls, except the known gap', () => {
+  it('serves every endpoint the frontend calls', () => {
     const missing = endpointsTheFrontendCalls().filter(path => {
       // A call to /api/progress/map is completed at runtime with /:subject.
       return !matchRoute(routes, path) && !routes.some(r => r.pattern.startsWith(`${path}/:`));
