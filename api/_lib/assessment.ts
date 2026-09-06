@@ -10,7 +10,7 @@
  * still open next door.
  */
 
-import { executeSql, executeTransaction, withTransaction } from './db.js';
+import { executeSql, withTransaction, type TransactionScope } from './db.js';
 import { selectMasteryItems, snapshotItem } from './item-bank.js';
 
 const poolSyncs = new Map<string, Promise<void>>();
@@ -59,82 +59,43 @@ export interface OpenedAttempt {
   items: { itemId: number; conceptId: string; question: AttemptQuestion }[];
 }
 
-/**
- * Stores an item, reusing the stored copy of an authored one.
- *
- * Authored items are reused across attempts by their curriculum id; generated
- * ones are new every time, because they are.
- */
-async function storeItem(
+/** Creates or reactivates one immutable authored snapshot inside its pool transaction. */
+async function storeAuthoredSnapshot(
+  scope: TransactionScope,
   subject: string,
   language: string,
-  source: 'authored' | 'generated',
   item: AttemptItem
 ): Promise<number> {
-  if (item.storedItemId !== undefined) return item.storedItemId;
+  if (!item.authoredId) throw new Error('An authored item needs a stable id');
 
   const snapshot = snapshotItem(item.question);
-  const identityParams = [subject, item.conceptId, language, item.authoredId ?? null];
+  const identityParams = [subject, item.conceptId, language, item.authoredId];
+  const existing = await scope.run<{ id: number }>(
+    `SELECT id FROM assessment_items
+     WHERE subject_id = $1 AND concept_id = $2 AND language = $3
+       AND authored_id = $4 AND content_hash = $5`,
+    [...identityParams, snapshot.contentHash]
+  );
 
-  const findSnapshot = async (): Promise<number | undefined> => {
-    if (source !== 'authored' || !item.authoredId) return undefined;
-    const existing = await executeSql<{ id: number }>(
-      `SELECT id FROM assessment_items
-       WHERE subject_id = $1 AND concept_id = $2 AND language = $3
-         AND authored_id = $4 AND content_hash = $5`,
-      [...identityParams, snapshot.contentHash]
+  let itemId = existing.rows[0]?.id;
+  if (itemId === undefined) {
+    const priorVersion = await scope.run<{ version: number }>(
+      `SELECT COALESCE(MAX(version), 0) AS version FROM assessment_items
+       WHERE subject_id = $1 AND concept_id = $2 AND language = $3 AND authored_id = $4`,
+      identityParams
     );
-    return existing.rows[0]?.id;
-  };
-
-  const activateSnapshot = async (itemId: number): Promise<void> => {
-    if (source !== 'authored' || !item.authoredId) return;
-    // The order matters with the partial unique index: retire the former
-    // active version before activating this exact immutable snapshot.
-    await executeTransaction([
-      {
-        sql: `UPDATE assessment_items SET status = 'retired'
-              WHERE subject_id = $1 AND concept_id = $2 AND language = $3
-                AND authored_id = $4 AND id <> $5`,
-        params: [...identityParams, itemId],
-      },
-      { sql: `UPDATE assessment_items SET status = 'active' WHERE id = $1`, params: [itemId] },
-    ]);
-  };
-
-  const reusable = await findSnapshot();
-  if (reusable !== undefined) {
-    await activateSnapshot(reusable);
-    return reusable;
-  }
-
-  // UNIQUE indexes arbitrate concurrent writers. A collision means another
-  // request won either the same hash or the next version; re-read and retry.
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const priorVersion = item.authoredId
-      ? await executeSql<{ version: number }>(
-        `SELECT COALESCE(MAX(version), 0) AS version FROM assessment_items
-         WHERE subject_id = $1 AND concept_id = $2 AND language = $3 AND authored_id = $4`,
-        identityParams
-      )
-      : { rows: [{ version: 0 }], rowCount: 1 };
     const version = Number(priorVersion.rows[0]?.version ?? 0) + 1;
-
-    const inserted = await executeSql<{ id: number }>(
+    const inserted = await scope.run<{ id: number }>(
       `INSERT INTO assessment_items
          (subject_id, concept_id, language, source, authored_id, stem, options,
           correct_answer, explanation, difficulty_tag, purpose, skill_tag,
           reasoning_type, distractor_rationale, distractor_error_code,
           pedagogical_rationale, content_hash, version, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-               $13, $14, $15, $16, $17, $18, $19)
-       ON CONFLICT DO NOTHING RETURNING id`,
+       VALUES ($1, $2, $3, 'authored', $4, $5, $6, $7, $8, $9, $10, $11,
+               $12, $13, $14, $15, $16, $17, 'retired')
+       RETURNING id`,
       [
-        subject,
-        item.conceptId,
-        language,
-        source,
-        item.authoredId ?? null,
+        ...identityParams,
         item.question.question,
         JSON.stringify(item.question.options),
         item.question.correctAnswer,
@@ -148,18 +109,57 @@ async function storeItem(
         snapshot.pedagogicalRationale,
         snapshot.contentHash,
         version,
-        source === 'authored' ? 'retired' : 'active',
       ]
     );
-
-    const itemId = inserted.rows[0]?.id ?? await findSnapshot();
-    if (itemId !== undefined) {
-      await activateSnapshot(itemId);
-      return itemId;
-    }
+    itemId = inserted.rows[0].id;
   }
 
-  throw new Error(`Could not persist a unique snapshot for authored item ${item.authoredId}`);
+  // The order matters with the partial unique index: retire the former active
+  // version before activating this exact immutable snapshot.
+  await scope.run(
+    `UPDATE assessment_items SET status = 'retired'
+     WHERE subject_id = $1 AND concept_id = $2 AND language = $3
+       AND authored_id = $4 AND id <> $5`,
+    [...identityParams, itemId]
+  );
+  await scope.run("UPDATE assessment_items SET status = 'active' WHERE id = $1", [itemId]);
+  return itemId;
+}
+
+/** Authored items reuse their snapshot; generated items are new every time. */
+async function storeItem(
+  subject: string,
+  language: string,
+  source: 'authored' | 'generated',
+  item: AttemptItem
+): Promise<number> {
+  if (item.storedItemId !== undefined) return item.storedItemId;
+
+  if (source === 'authored') {
+    if (!item.authoredId) throw new Error('An authored item needs a stable id');
+    return withTransaction(scope => storeAuthoredSnapshot(scope, subject, language, item));
+  }
+
+  const snapshot = snapshotItem(item.question);
+  const inserted = await executeSql<{ id: number }>(
+    `INSERT INTO assessment_items
+       (subject_id, concept_id, language, source, authored_id, stem, options,
+        correct_answer, explanation, difficulty_tag, purpose, skill_tag,
+        reasoning_type, distractor_rationale, distractor_error_code,
+        pedagogical_rationale, content_hash, version, status)
+     VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10, $11,
+             $12, $13, $14, $15, $16, 1, 'active')
+     RETURNING id`,
+    [
+      subject, item.conceptId, language, source, item.question.question,
+      JSON.stringify(item.question.options), item.question.correctAnswer,
+      item.question.explanation ?? null, snapshot.difficultyTag, snapshot.purpose,
+      snapshot.skillTag, snapshot.reasoningType, JSON.stringify(snapshot.distractorRationale),
+      JSON.stringify(snapshot.distractorErrorCode), snapshot.pedagogicalRationale,
+      snapshot.contentHash,
+    ]
+  );
+  return inserted.rows[0].id;
 }
 
 /** Persist the complete authored pool, then draw five items for this attempt. */
@@ -175,12 +175,24 @@ export async function drawFromAuthoredItemBank(options: {
   }
   const key = [options.subject, options.conceptId, options.language].join('\u0000');
   return withPoolLock(key, async () => {
-    const pool: AttemptItem[] = [];
-    for (const { id, ...question } of options.questions) {
-      const item: AttemptItem = { conceptId: options.conceptId, authoredId: id, question };
-      item.storedItemId = await storeItem(options.subject, options.language, 'authored', item);
-      pool.push(item);
-    }
+    const pool = await withTransaction(async scope => {
+      const synchronized: AttemptItem[] = [];
+      for (const { id, ...question } of options.questions) {
+        const item: AttemptItem = { conceptId: options.conceptId, authoredId: id, question };
+        item.storedItemId = await storeAuthoredSnapshot(scope, options.subject, options.language, item);
+        synchronized.push(item);
+      }
+
+      const placeholders = options.questions.map((_, index) => `$${index + 4}`).join(', ');
+      await scope.run(
+        `UPDATE assessment_items SET status = 'retired'
+         WHERE subject_id = $1 AND concept_id = $2 AND language = $3
+           AND authored_id IS NOT NULL AND status = 'active'
+           AND authored_id NOT IN (${placeholders})`,
+        [options.subject, options.conceptId, options.language, ...options.questions.map(item => item.id)]
+      );
+      return synchronized;
+    });
     return selectMasteryItems(pool, options.random);
   });
 }

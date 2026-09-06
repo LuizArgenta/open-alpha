@@ -126,6 +126,117 @@ describe('persisted item bank', () => {
     expect(Number(stored.rows[0].active)).toBe(7);
   });
 
+  it('retires items removed from the current pool without changing attempt evidence', async () => {
+    const studentId = await createUser('student');
+    const selected = await drawFromAuthoredItemBank({
+      subject: 'math', conceptId: 'item-bank-test', language: 'en', questions: pool,
+      // No Fisher-Yates swaps: item-1 is guaranteed to be linked to the attempt.
+      random: () => 0.999,
+    });
+    const opened = await openAttempt({
+      studentId,
+      subject: 'math',
+      conceptId: 'item-bank-test',
+      language: 'en',
+      kind: 'mastery',
+      source: 'authored',
+      items: selected,
+    });
+    const original = await executeSql<{ id: number; stem: string }>(
+      `SELECT id, stem FROM assessment_items
+       WHERE concept_id = 'item-bank-test' AND authored_id = 'item-1'`
+    );
+
+    await drawFromAuthoredItemBank({
+      subject: 'math', conceptId: 'item-bank-test', language: 'en', questions: pool.slice(1),
+    });
+
+    const removed = await executeSql<{ id: number; status: string; stem: string }>(
+      `SELECT id, status, stem FROM assessment_items
+       WHERE concept_id = 'item-bank-test' AND authored_id = 'item-1'`
+    );
+    const evidence = await executeSql<{ item_id: number; stem: string; status: string }>(
+      `SELECT ai.item_id, i.stem, i.status
+       FROM assessment_attempt_items ai
+       JOIN assessment_items i ON i.id = ai.item_id
+       WHERE ai.attempt_id = $1 AND i.authored_id = 'item-1'`,
+      [opened.attemptId]
+    );
+    const activeIds = await executeSql<{ authored_id: string }>(
+      `SELECT authored_id FROM assessment_items
+       WHERE concept_id = 'item-bank-test' AND status = 'active'
+       ORDER BY authored_id`
+    );
+
+    expect(removed.rows).toEqual([{
+      id: original.rows[0].id,
+      status: 'retired',
+      stem: original.rows[0].stem,
+    }]);
+    expect(evidence.rows).toEqual([{
+      item_id: original.rows[0].id,
+      stem: original.rows[0].stem,
+      status: 'retired',
+    }]);
+    expect(activeIds.rows.map(row => row.authored_id)).toEqual(
+      pool.slice(1).map(item => item.id)
+    );
+  });
+
+  it('rolls back version changes and retirement when a pool synchronization fails', async () => {
+    await drawFromAuthoredItemBank({
+      subject: 'math', conceptId: 'item-bank-test', language: 'en', questions: pool,
+    });
+    const invalidPool = [
+      { ...pool[0], question: 'A changed stem that must roll back.' },
+      // item-7 is absent, so a successful synchronization would retire it.
+      ...pool.slice(1, -1),
+      { ...question(8), difficultyTag: 'impossible' as any },
+    ];
+
+    await expect(drawFromAuthoredItemBank({
+      subject: 'math', conceptId: 'item-bank-test', language: 'en', questions: invalidPool,
+    })).rejects.toThrow();
+
+    const state = await executeSql<{ authored_id: string; version: number; status: string }>(
+      `SELECT authored_id, version, status FROM assessment_items
+       WHERE concept_id = 'item-bank-test' ORDER BY authored_id, version`
+    );
+    expect(state.rows).toHaveLength(7);
+    expect(state.rows.every(row => Number(row.version) === 1 && row.status === 'active')).toBe(true);
+  });
+
+  it('serializes concurrent pool replacements and leaves one complete pool active', async () => {
+    const withoutFirst = pool.slice(1);
+    const withoutSecond = pool.filter(item => item.id !== 'item-2');
+
+    await Promise.all([
+      drawFromAuthoredItemBank({
+        subject: 'math', conceptId: 'item-bank-test', language: 'en', questions: withoutFirst,
+      }),
+      drawFromAuthoredItemBank({
+        subject: 'math', conceptId: 'item-bank-test', language: 'en', questions: withoutSecond,
+      }),
+    ]);
+
+    const active = await executeSql<{ authored_id: string }>(
+      `SELECT authored_id FROM assessment_items
+       WHERE concept_id = 'item-bank-test' AND status = 'active'
+       ORDER BY authored_id`
+    );
+    const duplicateActive = await executeSql<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM (
+         SELECT authored_id FROM assessment_items
+         WHERE concept_id = 'item-bank-test' AND status = 'active'
+         GROUP BY authored_id HAVING COUNT(*) > 1
+       )`
+    );
+    expect(active.rows.map(row => row.authored_id)).toEqual(
+      withoutSecond.map(item => item.id)
+    );
+    expect(Number(duplicateActive.rows[0].count)).toBe(0);
+  });
+
   it('resumes a partial backfill and preserves identical legacy duplicates', async () => {
     const legacyQuestion: MasteryQuestion = {
       id: 'legacy-1',
