@@ -14,7 +14,16 @@ Não precisa ser uma LXP. Pode oferecer lições, mas isso é *uma forma* de int
 
 **Não é proprietário.** O grafo curricular é aberto e colaborativo, e cresce ao longo do tempo: mais matérias, mais domínios, povoados por professores e — mais adiante — por IA em escala. É a tese da "Wikipédia do aprendizado" do `ROADMAP.md`, e ela **não conflita** com este documento: um grafo aberto é o oposto de um repositório proprietário.
 
-**E não precisa ser só nosso.** O motor tem que funcionar igualmente bem sobre o livro da escola, o LMS dela ou as provas dela. Por isso `Intervention.source` admite `open_alpha`, `teacher`, `school`, `external` e `generated` como iguais — nenhum deles é o caminho privilegiado.
+**E não precisa ser só nosso.** O motor tem que funcionar igualmente bem sobre quatro origens, e `Intervention.source` as trata como iguais — nenhuma é o caminho privilegiado:
+
+| Origem | Exemplo |
+|---|---|
+| `external` | **Wikipedia, Wikidata, Grokipedia, OpenStax, padrões curriculares abertos** |
+| `teacher` | Contribuição revisada por pares |
+| `school` | O livro, o LMS e as provas de quem nos usa |
+| `generated` | Modelo — preferencialmente **adaptando** as três acima, não inventando do zero |
+
+**Corpora abertos são a via mais rápida para escala, e não são a mesma coisa que autoria.** Aproveitá-los é decisão de arquitetura, não de conteúdo: exige procedência, que hoje não existe (seção 5.5).
 
 A consequência comercial: **a escola não precisa trocar o que já usa.**
 
@@ -47,13 +56,13 @@ O Open Alpha **não** será:
 
 > Se amanhã uma escola disser *"não quero seu conteúdo, quero meu livro, meu LMS e meu endpoint de IA"*, o Open Alpha ainda consegue diagnosticar, decidir, recomendar uma intervenção e medir o resultado?
 
-**Hoje: não.** Quatro razões, todas mensuradas na seção 5.
+**Hoje: não.** Cinco razões, todas mensuradas na seção 5.
 
-## 5. Quatro pré-condições que a arquitetura-alvo assume e que não existem
+## 5. Cinco pré-condições que a arquitetura-alvo assume e que não existem
 
 Esta é a parte que separa este documento do memorando que o originou. As abstrações propostas são boas; elas se apoiam em coisas que não estão lá.
 
-**As quatro têm a mesma forma**, e vale nomear o padrão porque ele já apareceu quatro vezes numa auditoria só: *as duas pontas foram construídas e testadas, e o meio não existe.* Cada metade funciona; a ligação entre elas não; e nada percebe, porque nenhum teste percorre o caminho inteiro. O quinto caso foi encontrado e corrigido esta semana — o dashboard chamava `/api/progress/gamification` e nada respondia.
+**As quatro primeiras têm a mesma forma**, e vale nomear o padrão porque ele já apareceu quatro vezes numa auditoria só: *as duas pontas foram construídas e testadas, e o meio não existe.* Cada metade funciona; a ligação entre elas não; e nada percebe, porque nenhum teste percorre o caminho inteiro. O quinto caso foi encontrado e corrigido esta semana — o dashboard chamava `/api/progress/gamification` e nada respondia.
 
 ### 5.1 Os metadados pedagógicos não chegam a nenhuma decisão
 
@@ -88,7 +97,30 @@ Uma tabela `interventions` com `type: worked_example \| micro_lesson \| practice
 
 É o mesmo erro do item 20: sortear 5 itens de um pool de exatamente 5.
 
-A resposta para isso **não é autoria manual de 132 conceitos.** É o pipeline colaborativo — professores agora, IA em escala depois. Que existe. E que está quebrado no último metro, abaixo.
+A resposta para isso **não é autoria manual de 132 conceitos.** São três vias — corpora abertos, contribuição colaborativa e geração — e é preciso separar o que cada uma resolve, porque elas não resolvem a mesma coisa.
+
+**Exposição e avaliação são escassas de formas diferentes:**
+
+| | O que é | Corpora abertos resolvem? |
+|---|---|---|
+| **Exposição** | Explicar, exemplificar, contextualizar | **Sim, e rápido.** É exatamente o que uma enciclopédia é |
+| **Avaliação** | Pergunta com distratores que significam algo | **Quase nada.** Wikipedia não tem distratores, e nenhuma tem código de concepção equivocada |
+
+O motor roda sobre **evidência**, e evidência vem de avaliação. Uma enciclopédia não produz evidência de aprendizagem — produz material para uma intervenção do tipo `explanation`.
+
+Então ingerir Wikipedia move muito a coluna da esquerda e pouco a da direita. Os **9 de 141** continuam sendo 9 de 141 no dia seguinte à ingestão. Ainda assim vale muito: hoje 94% da exposição também é gerada do nada.
+
+**A consequência mais forte não é cobertura, é fundamentação.** Se o modelo passa a *adaptar* conteúdo aberto verificado em vez de *inventar*, três coisas mudam de uma vez:
+
+- **Alucinação deixa de ser a superfície principal.** O PR #24 existiu porque um item gerado podia ter `correctAnswer` que não correspondia a nenhuma opção. Reescrever uma fonte é um problema menor que inventar uma.
+- **Nível de leitura vira o trabalho do modelo, não a fonte de erro.** Uma criança de 8 anos não lê o artigo da Wikipedia sobre frações. Adaptar registro é exatamente o que um modelo faz bem.
+- **Existe a quem responsabilizar.** Uma explicação passa a ter fonte citável, o que a validação de conteúdo hoje não tem.
+
+`generated` deixa de ser autor e vira tradutor. É o melhor uso do modelo disponível nesta arquitetura.
+
+**Sobre grafos, não só texto:** o grafo de pré-requisitos é construído à mão, 141 nós. **Wikidata (CC0) e padrões curriculares abertos** — CASE/1EdTech, e a BNCC no caso brasileiro — já mapearam relações em outra ordem de grandeza. Para a *estrutura* eles servem melhor que prosa enciclopédica.
+
+O pipeline colaborativo, que também existe, está quebrado no último metro — abaixo.
 
 ### 5.4 A contribuição aprovada nunca chega ao aluno
 
@@ -99,6 +131,20 @@ O pipeline colaborativo existe e é real: `api/contribute/lesson.ts`, `api/contr
 Um professor contribui uma prova. Dois revisores aprovam. Ela fica em `status='approved'` para sempre.
 
 **Consequência:** a tese do grafo aberto e colaborativo é hoje aspiracional, não porque falte gente disposta, mas porque o último passo não existe. Fechar esse metro é barato — e é o que separa "queremos conteúdo colaborativo" de "temos conteúdo colaborativo".
+
+### 5.5 Não existe procedência
+
+Verificado: nem o `curriculum/schema.json` nem a interface `Concept` têm `source`, `url`, `license` ou `attribution`. O `explanation.text` é documentado como *"fonte de verdade para o tutor de IA"* — sem registro de de onde a verdade veio.
+
+Enquanto todo o conteúdo era nosso ou gerado, isso era desleixo. **Assim que entrar conteúdo aberto, vira obrigação.**
+
+- **Wikipedia é CC BY-SA.** Atribuição é exigida, e o *share-alike* é viral: derivados herdam a licença. Para um projeto aberto isso provavelmente até alinha, mas é decisão, não detalhe.
+- **Wikidata é CC0.** Sem restrição — a razão pela qual ela é o melhor ponto de partida para a *estrutura* do grafo.
+- **Grokipedia:** não sei quais são os termos atuais nem qual o regime de licenciamento, e não vou afirmar. **Precisa ser verificado antes de qualquer ingestão.** Vale também a diferença de processo: um corpus predominantemente gerado por IA não passou pelo escrutínio editorial que a Wikipedia tem, então a verificação humana pesa mais, não menos.
+
+**Ingerir sem campo de procedência é redistribuir sem atribuição.** O modelo de procedência não é um item de organização — é pré-requisito legal do primeiro corpus aberto que entrar.
+
+Ele também paga por si em pedagogia: quando um responsável contestar uma explicação, a resposta "veio deste artigo, nesta versão" é diferente de "o modelo escreveu".
 
 ## 6. Modelo de domínio
 
@@ -198,6 +244,9 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 | 1.3 | `Intervention` + `InterventionRun` mínimas | Fluxo atual encapsulado como intervenção. Nada muda para o aluno. |
 | 1.4 | Decisão retorna `nextAction` | Motor responde ação; `nextConcept` interno por compatibilidade. |
 | 1.5 | Resultados de intervenção | `start`/`complete`/`outcome` alimentam stream e linha do tempo. |
+| **1.6** | **Modelo de procedência** | `source`, `source_url`, `source_version`, `license` e `attribution` em conceito e intervenção. Teste: conteúdo sem procedência não publica. **Pré-requisito legal do 1.7**, não item de arrumação. |
+| **1.7** | **Adaptador de conteúdo aberto** | Um corpus, ponta a ponta, com atribuição renderizada ao aluno. Começar por **Wikidata (CC0)** para estrutura de grafo — sem o *share-alike* da Wikipedia enquanto o modelo de licença é novo. Critério: um conceito importado é ensinável e citável. |
+| **1.8** | **Geração fundamentada em fonte** | Quando existe conteúdo aberto para o conceito, o prompt **adapta** em vez de inventar, e a saída carrega a procedência da fonte. Reduz a superfície de alucinação e resolve nível de leitura. Depende de 1.6 e 1.7. |
 
 ### Onda 2 — medir com honestidade
 
@@ -228,7 +277,9 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 
 ### Fora da fila, e caminho crítico
 
-- **Povoar o grafo em massa.** 9 de 141 conceitos. **Declaradamente não é o foco agora** — mas o item 0.4 é, porque é a diferença entre uma porta fechada e uma porta aberta que ninguém atravessou ainda. Professores primeiro, IA em escala depois.
+- **Povoar o grafo em massa.** 9 de 141 conceitos com avaliação autorada. **Declaradamente não é o foco agora.** O que é foco é não fechar as portas: **0.4** (contribuição chega ao aluno) e **1.6–1.8** (conteúdo aberto entra com procedência). Depois disso, povoar é decisão de quando, não de se dá.
+
+  Vale lembrar a assimetria da seção 5.3: corpora abertos movem muito a **exposição** e quase nada a **avaliação**. Os 9 de 141 continuam 9 de 141 no dia seguinte à ingestão.
 - **LGPD operacional** (retenção, exportação, exclusão). O aviso existe; as três entregas não. **Bloqueia uso por menores**, não o piloto com adultos.
 - **Item 13b** (Argon2id), **item 14** (sessões revogáveis). Autenticação, valem por si.
 - `react-router` major.
@@ -239,6 +290,7 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 |---|---|---|---|
 | Metadados no diagnóstico | ausente | **0.1a produz, 0.1b consome** | Pré-requisito não declarado do diferencial dele — e o cano está vazio nas duas pontas |
 | Último metro da contribuição | ausente | **0.4** | Sem ele o grafo colaborativo é aspiracional |
+| Corpora abertos como fonte | ausente | **1.6–1.8** | Via mais rápida para escala de exposição, e fundamenta a geração |
 | Servidor escrevendo eventos | ausente | **0.2, antes do contrato** | Canonizar um stream com buracos os torna permanentes |
 | Abstração de IA | onda 1 completa | 0.3 barato agora, política na onda 4 | Política por escopo não paga sem escolas |
 | Avaliação externa | onda 2, depois de tenancy | **onda 2, antes** | Barata e é o que torna o motor falsificável |

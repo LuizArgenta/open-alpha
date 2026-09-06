@@ -35,9 +35,23 @@ doing.
 **The content is not ours, in two senses.** It is not proprietary: the
 curriculum graph is open and collaborative, it grows over time, and it is meant
 to be populated by teachers — and eventually by AI at scale. And it does not
-have to be ours at all: the engine is designed to work just as well over
-someone else's textbook, lessons and tests. A school does not have to replace
-what it already uses.
+have to be ours at all. The engine is designed to work equally well over four
+sources: existing open corpora (Wikipedia, Wikidata, open curriculum
+standards), peer-reviewed contributions, a school's own textbook and tests, and
+model generation. A school does not have to replace what it already uses.
+
+Open corpora are the fastest route to scale, with one asymmetry worth stating:
+an encyclopedia is excellent at *explaining* and has almost nothing to say about
+*assessing*. It has no distractors, and no record of which misconception each
+wrong answer represents. So open content moves explanation coverage a long way
+and assessment coverage barely at all.
+
+The bigger prize is grounding. Today 94% of the curriculum is generated from
+nothing, which is where the risk of a confidently wrong lesson lives. A model
+that *adapts* verified open material instead of inventing it hallucinates less,
+solves the reading-level problem — an eight-year-old cannot read the Wikipedia
+article on fractions — and leaves something citable behind when a parent asks
+where an explanation came from.
 
 Read the architecture this is heading towards in
 [docs/PRD-v3-motor-de-intervencao.md](./docs/PRD-v3-motor-de-intervencao.md)
@@ -68,6 +82,11 @@ calls, and rate-limited authentication.
   contribution sits at `approved` forever. Nothing publishes it. Closing that
   last step is what turns the collaborative graph from an intention into a
   fact.
+- **Nothing records where content came from.** There is no `source`, `url`,
+  `license` or `attribution` field anywhere in the curriculum model. That was
+  untidy while everything was ours or generated; it becomes a licensing
+  obligation the moment open corpora are ingested, since CC BY-SA requires
+  attribution.
 - **The pedagogical metadata is recorded but unused.** Each item stores the
   misconception behind each wrong option — and no query reads it yet. Three
   mistakes from one misunderstanding and three unrelated mistakes currently
