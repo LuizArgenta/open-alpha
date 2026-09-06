@@ -16,9 +16,9 @@ Mergeado em `main` (PRs #1 a #19): motor de decisão com volta ao pré-requisito
 
 Mergeado depois disso, os **seis primeiros itens do Marco 1**: [#20](https://github.com/LuizArgenta/open-alpha/pull/20) correção da prova no servidor, [#22](https://github.com/LuizArgenta/open-alpha/pull/22) transação única na submissão e expiração de tentativa, [#23](https://github.com/LuizArgenta/open-alpha/pull/23) fim do fallback silencioso, [#24](https://github.com/LuizArgenta/open-alpha/pull/24) leitura de currículo endurecida, [#25](https://github.com/LuizArgenta/open-alpha/pull/25) invalidação do cache de currículo, [#26](https://github.com/LuizArgenta/open-alpha/pull/26) nivelamento no modelo de tentativa.
 
-Da segunda auditoria, os dois primeiros itens novos já mergeados: [#28](https://github.com/LuizArgenta/open-alpha/pull/28) headers de segurança (item 17) e [#29](https://github.com/LuizArgenta/open-alpha/pull/29) binding de parâmetros SQL por número (item 7) — este último descascou e corrigiu de quebra um segundo bug real que o binding antigo escondia no `UPDATE progress` de `submit.ts`.
+Da segunda auditoria, já mergeados: [#28](https://github.com/LuizArgenta/open-alpha/pull/28) headers de segurança (item 17), [#29](https://github.com/LuizArgenta/open-alpha/pull/29) binding de parâmetros SQL por número (item 7) — descascou e corrigiu de quebra um segundo bug real que o binding antigo escondia no `UPDATE progress` de `submit.ts` —, e [#31](https://github.com/LuizArgenta/open-alpha/pull/31) equivalência de constraint em `assessment_responses` entre banco novo e migrado (item 8).
 
-**217 testes**, contra 160 quando este plano foi escrito.
+**221 testes**, contra 160 quando este plano foi escrito.
 
 **Segunda auditoria (mesma data):** comparando os PRs #20 e #22–#26 com o código mesclado (não só com a descrição dos PRs), os itens 2 e 4 não estão integralmente fechados — ficam em **~85%**. Quatro problemas de fundo, todos confirmados lendo `api/_lib/db.ts`, `api/_lib/assessment.ts` e `api/tutor/quiz/submit.ts` diretamente:
 
@@ -44,7 +44,7 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
 - [x] **5. Fim do fallback silencioso** — PR #23. `curriculumStatus`, `GET /api/health/curriculum` respondendo 503, aviso na página de admin, e `CURRICULUM_REQUIRE_DATABASE` para recusar servir os arquivos.
 - [x] **6. Invalidação do cache de currículo** — PR #25. Revisão derivada (ninguém precisa lembrar de incrementar) e refresh em segundo plano; publicar força a instância que atendeu.
 - [x] **7. Corrigir o binding de parâmetros SQL ($N)** *(P)* — [PR #29](https://github.com/LuizArgenta/open-alpha/pull/29). `executeSql` e `toLibsqlStatement` (`db.ts`) agora ligam por `params[Number(number) - 1]` numa função só, e lançam erro em vez de ligar silenciosamente quando falta argumento. Varredura no repositório não achou consulta que dependesse do comportamento antigo — mas a suíte completa achou uma direta: o `UPDATE progress` em `submit.ts` tinha `$4/$5/$6` fixos no `WHERE` que só coincidiam com a posição certa quando havia `schedule`; corrigido numerando os placeholders a partir de um contador. Prova viva de por que o binding por posição era perigoso.
-- [ ] **8. Garantir equivalência entre banco novo e banco migrado** *(M)* — `assessment_responses` tem `UNIQUE(attempt_id, item_id)` na criação nova; a migração que roda contra banco já existente recria a tabela sem essa restrição (`CREATE TABLE IF NOT EXISTS`, db.ts:481-489), então instalação anterior ao PR #20 segue sem a proteção. Criar índice único explícito, tratar duplicatas existentes antes, testar migração a partir de snapshot do schema anterior, comparar schema final de banco novo × migrado.
+- [x] **8. Garantir equivalência entre banco novo e banco migrado** *(M)* — [PR #31](https://github.com/LuizArgenta/open-alpha/pull/31). `ensureAssessmentResponsesUniqueConstraint` (`db.ts`) checa `PRAGMA index_list` e, se a constraint não existe, deduplica respostas existentes (mantém a mais antiga por `attempt_id, item_id`) e cria o índice único, retroativo em qualquer instalação. Rodada a cada boot, mas barata: sai no primeiro check quando já está em dia. **Escopo:** cobre o achado específico da auditoria (`assessment_responses`); um diff de schema genérico entre banco novo e migrado, cobrindo toda tabela, fica para o item 12 (migrações versionadas), que é o lugar estrutural certo para isso.
 - [ ] **9. Tornar a finalização da tentativa concorrente-segura e idempotente** *(M)* — completa o item 2. Preferência: tabela `assessment_attempt_finalizations` com `attempt_id` como chave primária, `INSERT` dela como primeira instrução da transação — uma segunda finalização viola a chave e reverte tudo. Alternativa: `UPDATE ... WHERE id = ? AND finished_at IS NULL RETURNING id` dentro da transação, seguir só se uma linha mudou. Teste com duas submissões via `Promise.all`: uma única resposta de sucesso, um único XP, um único incremento de `attempts`.
 - [ ] **10. Versionar itens autorados como snapshots imutáveis** *(M)* — completa o item 4. Tratar `assessment_items` como snapshot: `content_hash` além de `authored_id`, novo item quando enunciado/alternativas/gabarito/explicação mudar, nunca atualizar retroativamente um item já ligado a tentativas. Teste: editar o conteúdo sem trocar `authoredId` cria um `assessment_item` novo; tentativas antigas continuam lendo o snapshot antigo; o conteúdo mostrado ao aluno bate byte a byte com o snapshot usado na correção.
 - [ ] **11. Tornar `openAttempt` transacional** *(P)* — hoje grava itens, depois a tentativa, depois os vínculos em `executeSql` separados (`assessment.ts`); uma falha no meio deixa itens órfãos ou tentativa incompleta. Uma transação só, e recusar tentativa com zero itens ou vínculo incompleto.
@@ -100,7 +100,7 @@ Precisam de alguém que não é o time de engenharia:
 1. ~~**Antes:** 2 → 5 → 4 → 6 → 3.~~ **Feito** (PRs #22 a #26) — mas a segunda auditoria achou que "feito" era otimista sobre concorrência e versionamento. Revisado abaixo.
 2. **Agora, nesta ordem — nenhum algoritmo novo antes disso:**
    1. **7** — binding de `$N` (afeta toda query com parâmetros; risco cresce a cada endpoint novo). ✅ PR #29.
-   2. **8** — constraints equivalentes em banco novo × migrado.
+   2. **8** — constraints equivalentes em banco novo × migrado. ✅ PR #31.
    3. **9** — finalização da tentativa concorrente-segura e idempotente.
    4. **10** — snapshots imutáveis dos itens autorados.
    5. **11** — `openAttempt` transacional.
@@ -119,7 +119,7 @@ Chamar isto de substituto local acadêmico exige, da auditoria original e da com
 - [ ] Todo domínio reconstruível a partir das evidências *(parcial — PRs #20, #22, #26 guardam item, resposta e decisão, mas o item respondido não é um snapshot imutável: ver item 10)*
 - [ ] Toda tentativa vinculada a aluno, finalidade e snapshot imutável dos itens *(item 10)*
 - [ ] Submissões simultâneas produzem exatamente um resultado *(item 9)*
-- [ ] Banco novo e banco migrado têm constraints equivalentes *(item 8)*
+- [x] Banco novo e banco migrado têm constraints equivalentes para `assessment_responses` *(item 8, PR #31 — genérico para toda tabela fica no item 12)*
 - [ ] Falha intermediária em qualquer escrita composta provoca rollback integral *(itens 11, 12)*
 - [ ] Migração inesperadamente defeituosa interrompe a inicialização em vez de seguir silenciosa *(item 12)*
 - [ ] Currículo-alvo completo e revisado
