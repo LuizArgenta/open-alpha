@@ -275,6 +275,50 @@ export async function executeTransaction(statements: SqlStatement[]): Promise<vo
   }
 }
 
+/** Reads and writes issued inside a `withTransaction` callback. */
+export interface TransactionScope {
+  run<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[]
+  ): Promise<{ rows: T[]; rowCount: number }>;
+}
+
+/**
+ * A transaction whose later statements depend on what the earlier ones
+ * returned — the case `executeTransaction` deliberately cannot serve.
+ *
+ * The prepared-list form above is still the right tool whenever every write is
+ * known before the first one, and it stays the default: a callback makes it
+ * easy to accidentally hold the write lock across an LLM call or an HTTP
+ * request. Reach for this one only when an id or a row count produced *inside*
+ * the transaction decides what happens next — `openAttempt` needs the attempt
+ * id to write its item links, and a guarded finalisation needs to know whether
+ * its `UPDATE` actually matched a row.
+ *
+ * Use `scope.run` for every statement inside the callback. Calling `executeSql`
+ * in there instead would run outside the transaction, on a connection that
+ * libsql serialises behind this one's write lock — so it would not roll back
+ * with the rest, and can deadlock.
+ */
+export async function withTransaction<T>(
+  work: (scope: TransactionScope) => Promise<T>
+): Promise<T> {
+  const transaction = await client.transaction('write');
+  try {
+    const result = await work({
+      run: async (sql, params) => {
+        const executed = await transaction.execute(toLibsqlStatement({ sql, params }));
+        return { rows: executed.rows as any[], rowCount: executed.rowsAffected };
+      },
+    });
+    await transaction.commit();
+    return result;
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
 export async function initializeSchema(): Promise<void> {
   await client.executeMultiple(`
     -- Users (students and parents)
