@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { signToken } from '../api/_lib/auth.js';
 import { drawFromAuthoredItemBank, openAttempt, withoutAnswerKey } from '../api/_lib/assessment.js';
 import { executeSql, initializeSchema } from '../api/_lib/db.js';
 import { selectMasteryItems, snapshotItem } from '../api/_lib/item-bank.js';
@@ -63,7 +64,9 @@ describe('persisted item bank', () => {
     const practiceOnly = pool.slice(0, 5).map(item => ({ ...item, purpose: 'practice' as const }));
     await expect(drawFromAuthoredItemBank({
       subject: 'math', conceptId: 'invalid-pool', language: 'en', questions: practiceOnly,
-    })).rejects.toThrow('at least five mastery items');
+    // A pool of practice-only items has no mastery items at all — the floor
+    // is one now that authored and generated compose, not five.
+    })).rejects.toThrow('at least one mastery item');
 
     const stored = await executeSql<{ count: number }>(
       `SELECT COUNT(*) AS count FROM assessment_items WHERE concept_id = 'invalid-pool'`
@@ -72,13 +75,15 @@ describe('persisted item bank', () => {
   });
 
   it('accepts an authored lesson contribution with a pool larger than five', async () => {
+    // Signed in, because the contributor is now whoever holds the token — a
+    // name in the body would let one person contribute and review.
+    const token = signToken({ userId: await createUser('parent'), role: 'parent' });
     const response = await contributeLesson(new Request('https://test.local/api/contribute/lesson', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({
         conceptId: 'math-fractions-intro',
         subjectId: 'math',
-        contributorId: 'teacher@example.test',
         content: { masteryCheck: { questions: pool } },
       }),
     }));

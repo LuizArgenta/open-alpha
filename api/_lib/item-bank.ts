@@ -83,12 +83,19 @@ function shuffled<T>(items: T[], random: () => number): T[] {
  */
 export function selectMasteryItems<T extends { question: ItemBankQuestion }>(
   pool: T[],
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  /**
+   * How many to draw. Defaults to a whole attempt, but a caller topping up a
+   * small authored pool with generated items asks for fewer — which is what
+   * lets a teacher's first contribution reach a learner instead of waiting for
+   * the pool to reach five.
+   */
+  count: number = ITEMS_PER_MASTERY_ATTEMPT
 ): T[] {
   const eligible = pool.filter(item => (item.question.purpose ?? 'mastery') === 'mastery');
-  if (eligible.length < ITEMS_PER_MASTERY_ATTEMPT) {
-    throw new Error(`Item bank needs at least ${ITEMS_PER_MASTERY_ATTEMPT} mastery items`);
+  if (eligible.length < count) {
+    throw new Error(`Item bank needs at least ${count} mastery items, has ${eligible.length}`);
   }
 
-  return shuffled(eligible, random).slice(0, ITEMS_PER_MASTERY_ATTEMPT);
+  return shuffled(eligible, random).slice(0, count);
 }

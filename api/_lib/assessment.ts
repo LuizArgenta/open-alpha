@@ -162,16 +162,30 @@ async function storeItem(
   return inserted.rows[0].id;
 }
 
-/** Persist the complete authored pool, then draw five items for this attempt. */
+/**
+ * Persist the complete authored pool, then draw from it for this attempt.
+ *
+ * Draws fewer than a full attempt when asked. The endpoint tops the rest up
+ * with generated items, so a concept with one authored question serves that
+ * question plus four generated ones — instead of ignoring the authored pool
+ * entirely until it reaches five, which is what made an approved contribution
+ * publish to the database and never reach a learner.
+ */
 export async function drawFromAuthoredItemBank(options: {
   subject: string;
   conceptId: string;
   language: string;
   questions: Array<AttemptQuestion & { id: string }>;
   random?: () => number;
+  /** Defaults to a whole attempt; fewer when generated items make up the rest. */
+  count?: number;
 }): Promise<AttemptItem[]> {
-  if (options.questions.filter(item => (item.purpose ?? 'mastery') === 'mastery').length < 5) {
-    throw new Error('An authored item bank needs at least five mastery items');
+  const available = options.questions.filter(
+    item => (item.purpose ?? 'mastery') === 'mastery'
+  ).length;
+  const wanted = Math.min(options.count ?? 5, available);
+  if (wanted < 1) {
+    throw new Error('An authored item bank needs at least one mastery item');
   }
   const key = [options.subject, options.conceptId, options.language].join('\u0000');
   return withPoolLock(key, async () => {
@@ -193,7 +207,7 @@ export async function drawFromAuthoredItemBank(options: {
       );
       return synchronized;
     });
-    return selectMasteryItems(pool, options.random);
+    return selectMasteryItems(pool, options.random, wanted);
   });
 }
 

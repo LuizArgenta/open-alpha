@@ -366,7 +366,9 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 
 ### Onda 0 — tornar utilizável a evidência que já existe ✅
 
-*Nada novo. Só ligar o que está desconectado. Entregue no [PR #52](https://github.com/LuizArgenta/open-alpha/pull/52).*
+*Nada novo. Só ligar o que está desconectado. Entregue no [PR #52](https://github.com/LuizArgenta/open-alpha/pull/52), **exceto o 0.4**.*
+
+**Correção de registro.** Esta onda foi marcada como concluída e não estava. O teste de aceite do 0.4 chamava-se `contribution-reaches-student` e afirmava verificar "o currículo que um aluno recebe" — mas conferia a linha no banco e **nunca chamava o endpoint de prova**. Uma auditoria externa apontou; a verificação empírica confirmou: contribuição com status `deployed`, e o aluno recebe cinco perguntas geradas. É a quinta ocorrência do padrão que esta seção existe para nomear, cometida dentro do teste escrito para provar o caminho.
 
 **O que a onda encontrou de quebra**, nenhum dos quais estava na lista: item gerado chegava ao aluno **sem validação nenhuma** — a proteção contra prova impossível do #24 cobria só 9 de 141 conceitos; um sexto modelo fixo em `curriculum/lesson.ts`; e um `SQLITE_BUSY` que eu reintroduzi escrevendo evento fora da fila, terceira ocorrência dessa classe no projeto.
 
@@ -376,7 +378,9 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 | **0.1b** ✅ | **Consumir no diagnóstico** — [PR #52](https://github.com/LuizArgenta/open-alpha/pull/52) | `loadAttemptAnswers` carrega o código; `diagnoseAttempt` distingue *três erros pela mesma causa* de *três erros distintos*. Teste que falha se os dois casos derem o mesmo diagnóstico — e que roda contra o caminho real do item, não contra fixtures. |
 | **0.2** ✅ | **Servidor como escritor de eventos** — [PR #52](https://github.com/LuizArgenta/open-alpha/pull/52) | Abrir tentativa, corrigir resposta, finalizar, decidir e conceder XP emitem evento. Teste: fazer uma prova sem o navegador reportar nada produz stream completo. |
 | **0.3** ✅ | **Endpoint *e modelo* configuráveis** — [PR #52](https://github.com/LuizArgenta/open-alpha/pull/52) | `LLM_BASE_URL` **e** o id do modelo vêm da configuração, por capacidade, com a ATXP e `claude-sonnet-4-6` como padrão. Hoje o modelo está fixo em cinco lugares, então só tornar a URL configurável ainda quebra contra qualquer servidor local, que não expõe esse nome. Critério: sobe contra endpoint compatível servindo um modelo de nome próprio. |
-| **0.4** ✅ | **Contribuição aprovada chega ao aluno** — [PR #52](https://github.com/LuizArgenta/open-alpha/pull/52) | Uma contribuição `approved` vira conceito ou item publicado e passa a `'deployed'`. Teste: professor contribui → dois revisores aprovam → um aluno senta a prova. Hoje esse teste é impossível de escrever. |
+| **0.4** ✅ | **Contribuição aprovada chega ao aluno** — [PR #52](https://github.com/LuizArgenta/open-alpha/pull/52) publicou no banco, **mas não ao aluno**. Ver 0.4a e 0.4b |
+| **0.4a** ✅ | **Chegar de verdade** — [PR #54](https://github.com/LuizArgenta/open-alpha/pull/54) | O endpoint de prova só usa o pool autorado com **≥5 itens mastery**, então uma contribuição de uma pergunta é ignorada e o modelo gera cinco. Critério: contribuir → aprovar → `POST /api/tutor/quiz` → a pergunta da professora está entre as que o aluno recebe. |
+| **0.4b** ✅ | **Identidade autenticada** — [PR #54](https://github.com/LuizArgenta/open-alpha/pull/54) | `contributorId` e `reviewerId` vêm do corpo da requisição; `getAuthFromRequest` está importado e nunca chamado em `review.ts`. A guarda anti-auto-revisão compara duas strings escolhidas pelo cliente. Antes do 0.4 era uma fila que ninguém lia; agora publica para alunos. |
 
 ### Onda 1 — a mudança de contrato
 

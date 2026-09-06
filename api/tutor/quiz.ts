@@ -1,4 +1,5 @@
 import { executeSql } from '../_lib/db.js';
+import { ITEMS_PER_MASTERY_ATTEMPT as ITEMS_PER_ATTEMPT } from '../_lib/item-bank.js';
 import { LlmUnavailableError, unavailableResponse } from '../_lib/llm-budget.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage, generateQuizQuestions } from '../_lib/llm.js';
@@ -43,18 +44,37 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Concept not found' }, { status: 400 });
     }
 
-    // Authored mastery checks are item pools: persist every item, then draw the
-    // five that form this attempt. More adaptive selection belongs to item 20.
+    /**
+     * Authored and generated items compose, rather than one excluding the
+     * other.
+     *
+     * The endpoint used to require five authored mastery items before it would
+     * touch the bank at all. That made an approved contribution publish into
+     * the curriculum and never reach a learner: a concept with one contributed
+     * question had a pool of one, so the pool was ignored and the model wrote
+     * five from scratch. `deployed` meant "in the database", not "in front of
+     * a student".
+     *
+     * Now whatever is authored is served, and the model fills the rest. A
+     * teacher's first question counts from the moment it clears review, which
+     * is what makes contributing worth doing.
+     */
     const authored = concept.masteryCheck?.questions;
-    const masteryItemCount = authored?.filter(item => (item.purpose ?? 'mastery') === 'mastery').length ?? 0;
-    const hasStableIds = authored?.every(item => typeof item.id === 'string' && item.id.trim().length > 0) ?? false;
-    if (masteryItemCount >= 5 && hasStableIds) {
-      const selected = await drawFromAuthoredItemBank({
-        subject,
-        conceptId,
-        language,
-        questions: authored!,
-      });
+    const eligible = authored?.filter(item => (item.purpose ?? 'mastery') === 'mastery') ?? [];
+    const hasStableIds = eligible.every(item => typeof item.id === 'string' && item.id.trim().length > 0);
+    const authoredCount = hasStableIds ? Math.min(eligible.length, ITEMS_PER_ATTEMPT) : 0;
+
+    const authoredItems = authoredCount > 0
+      ? await drawFromAuthoredItemBank({
+          subject,
+          conceptId,
+          language,
+          questions: authored!,
+          count: authoredCount,
+        })
+      : [];
+
+    if (authoredItems.length >= ITEMS_PER_ATTEMPT) {
       const { attemptId, items } = await openAttempt({
         studentId: auth.userId,
         subject,
@@ -62,7 +82,7 @@ export async function POST(request: Request) {
         language,
         kind: 'mastery',
         source: 'authored',
-        items: selected,
+        items: authoredItems,
       });
       await recordEvent({
         studentId: auth.userId, subject, conceptId,
@@ -88,11 +108,12 @@ export async function POST(request: Request) {
       ? Math.round(recentResult.rows.reduce((sum, p) => sum + p.mastery_score, 0) / recentResult.rows.length)
       : undefined;
 
+    const missing = ITEMS_PER_ATTEMPT - authoredItems.length;
     const quizJson = await generateQuizQuestions(
       subject,
       concept.name,
       userResult.rows[0].grade_level,
-      5,
+      missing,
       interests,
       recentAccuracy,
       language
@@ -139,6 +160,11 @@ export async function POST(request: Request) {
       );
     }
 
+    /**
+     * Authored items arrive already stored, so `storeItem` short-circuits on
+     * them and `source: 'generated'` applies only to the ones the model wrote.
+     * Mixed attempts need no separate path.
+     */
     const { attemptId, items } = await openAttempt({
       studentId: auth.userId,
       subject,
@@ -146,12 +172,18 @@ export async function POST(request: Request) {
       language,
       kind: 'mastery',
       source: 'generated',
-      items: questions.map(question => ({ conceptId, question })),
+      items: [...authoredItems, ...questions.map(question => ({ conceptId, question }))],
     });
 
     await recordEvent({
       studentId: auth.userId, subject, conceptId,
-      type: 'quiz_start', attemptId, payload: { source: 'generated', items: items.length },
+      type: 'quiz_start',
+      attemptId,
+      payload: {
+        source: authoredItems.length > 0 ? 'mixed' : 'generated',
+        items: items.length,
+        authored: authoredItems.length,
+      },
     });
 
     return Response.json({ attemptId, questions: items.map(withoutAnswerKey) });
