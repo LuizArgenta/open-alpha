@@ -22,6 +22,7 @@ import { executeSql, executeTransaction } from '../api/_lib/db.js';
 import { createUser, resetDatabase } from './helpers/database.js';
 import {
   completeRunStatement,
+  directRunner,
   findIntervention,
   openRunsFor,
   startRunStatement,
@@ -166,7 +167,7 @@ describe('an intervention is not a lesson', () => {
 
       // Found by the same query the engine's own runs are found by. No filter
       // on source anywhere in it.
-      const open = await openRunsFor(studentId, SUBJECT, CONCEPT);
+      const open = await openRunsFor(directRunner, studentId, SUBJECT, CONCEPT);
       expect(open).toHaveLength(1);
       expect(open[0].expectedOutcome).toEqual(EXPECTED);
 
@@ -184,7 +185,7 @@ describe('an intervention is not a lesson', () => {
       expect(stored.rows[0].source).toBe(testCase.source);
       expect(stored.rows[0].content_ref).toBe(testCase.contentRef ?? null);
 
-      expect(await openRunsFor(studentId, SUBJECT, CONCEPT)).toHaveLength(0);
+      expect(await openRunsFor(directRunner, studentId, SUBJECT, CONCEPT)).toHaveLength(0);
     });
   }
 
@@ -209,7 +210,7 @@ describe('an intervention is not a lesson', () => {
         expectedOutcome: EXPECTED,
       }, intervention.id)]);
 
-      const [run] = await openRunsFor(otherStudent, SUBJECT, CONCEPT);
+      const [run] = await openRunsFor(directRunner, otherStudent, SUBJECT, CONCEPT);
       await executeTransaction([completeRunStatement(
         run.id,
         judgeRun(run.expectedOutcome, { score: index === 0 ? 95 : 55, attention: false })

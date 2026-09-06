@@ -34,11 +34,20 @@ interface InterventionRow {
   status: string;
 }
 
+/**
+ * The live version of an intervention.
+ *
+ * `active`, not "anything but retired". Those differ the moment a draft
+ * revision of an existing key is written: excluding only retired rows picks
+ * the newest draft, and since `submit.ts` uses this to choose what a student
+ * actually receives, an unpublished definition would start taking real runs
+ * the instant someone saved it. A draft is a draft.
+ */
 export async function findIntervention(key: string): Promise<Intervention | undefined> {
   const rows = await executeSql<InterventionRow>(
     `SELECT id, key, type, target_kind, target_id, source, content_ref,
             estimated_minutes, version, status
-     FROM interventions WHERE key = $1 AND status != 'retired'
+     FROM interventions WHERE key = $1 AND status = 'active'
      ORDER BY version DESC LIMIT 1`,
     [key]
   );
@@ -104,12 +113,29 @@ interface OpenRunRow {
 }
 
 /** Runs still waiting on a result, oldest first. */
+/** Runs a query, either directly or inside a transaction that owns the lock. */
+export type Runner = <T>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
+
+export const directRunner: Runner = <T>(sql: string, params?: unknown[]) =>
+  executeSql<T>(sql, params) as Promise<{ rows: T[] }>;
+
+/**
+ * Runs still waiting on a result, oldest first.
+ *
+ * Takes a runner so the caller can read *inside* its own transaction. That is
+ * not a nicety: read before the transaction, two submissions of two attempts
+ * on the same concept both see the same open run, and each starts a
+ * replacement — leaving two open runs that a later attempt would credit with
+ * one outcome. The same shape `scoreFromStoredAnswers` uses, and for the same
+ * reason.
+ */
 export async function openRunsFor(
+  runner: Runner,
   studentId: number,
   subject: string,
   conceptId: string
 ): Promise<OpenRun[]> {
-  const rows = await executeSql<OpenRunRow>(
+  const rows = await runner<OpenRunRow>(
     `SELECT id, run_id, intervention_id, expected_outcome, started_at
      FROM intervention_runs
      WHERE student_id = $1 AND subject = $2 AND concept_id = $3 AND completed_at IS NULL
@@ -117,7 +143,7 @@ export async function openRunsFor(
     [studentId, subject, conceptId]
   );
 
-  return rows.rows.flatMap(row => {
+  return rows.rows.flatMap((row: OpenRunRow) => {
     let expectedOutcome: ExpectedOutcome;
     try {
       expectedOutcome = JSON.parse(row.expected_outcome) as ExpectedOutcome;

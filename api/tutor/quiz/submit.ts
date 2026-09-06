@@ -36,6 +36,7 @@ interface AttemptRow {
   concept_id: string;
   finished_at: string | null;
   expired_at: string | null;
+  started_at: string;
   stale: number;
 }
 
@@ -179,7 +180,7 @@ export async function POST(request: Request) {
     const attemptId = body.attemptId as number;
 
     const attemptRow = await executeSql<AttemptRow>(
-      `SELECT student_id, subject, concept_id, finished_at, expired_at,
+      `SELECT student_id, subject, concept_id, finished_at, expired_at, started_at,
               started_at < datetime('now', $1) as stale
        FROM assessment_attempts WHERE id = $2`,
       [ATTEMPT_DEADLINE_MODIFIER, attemptId]
@@ -223,16 +224,13 @@ export async function POST(request: Request) {
     const remediationIfFailed = await buildRemediation(auth.userId, subject, conceptId);
 
     /**
-     * Interventions already running on this concept, and the catalogue entry
-     * for the one this attempt might start.
+     * The catalogue entry for the intervention this attempt might start.
      *
-     * Read out here for the same reason `buildRemediation` is: both are reads,
-     * and a read issued from inside a write transaction runs on another
-     * connection that libsql serialises behind this one's lock. Resolved
-     * unconditionally because whether they get *used* depends on how the
-     * attempt went, and finding that out is what the transaction is for.
+     * Read out here for the same reason `buildRemediation` is: it is a read,
+     * and one issued from inside a write transaction runs on another
+     * connection that libsql serialises behind this one's lock. The *open
+     * runs* are deliberately not read here — see inside the transaction.
      */
-    const runsAwaitingResult = await openRunsFor(auth.userId, subject, conceptId);
     const catalogue = new Map(await Promise.all(
       ['review_prerequisites', 'sub_skill', 'simpler_explanation', 'extra_practice'].map(
         async action => {
@@ -416,16 +414,43 @@ export async function POST(request: Request) {
       );
 
       /**
-       * Every intervention still waiting on a result is judged against this
-       * attempt, before a new one is started.
+       * Interventions still waiting on a result, judged against this attempt.
        *
        * The prediction was written when the run began — "this student, at 40
        * on this concept, should reach 80 on their next attempt" — so scoring
-       * it here is a comparison against something recorded in advance rather
-       * than a story told afterwards. That is the difference between this
-       * table and telemetry.
+       * it here compares against something recorded in advance rather than a
+       * story told afterwards. That is the difference between this table and
+       * telemetry.
+       *
+       * Read inside the transaction, not before it. Two attempts on the same
+       * concept submitted close together would otherwise both see the same
+       * open run and each start a replacement, leaving two open runs for a
+       * later attempt to credit with one outcome. `scope.run` is this
+       * transaction's own connection, which is what makes the read safe here
+       * where a bare `executeSql` would deadlock behind its lock.
        */
-      for (const run of runsAwaitingResult) {
+      const awaitingResult = await openRunsFor(scope.run, auth.userId, subject, conceptId);
+
+      /**
+       * And only attempts that *began after* the intervention can say anything
+       * about it.
+       *
+       * A learner can open two quizzes on a concept, answer both, then submit
+       * them in order: the first failure starts a run, and the second — whose
+       * answers were given before that run existed — would be recorded as its
+       * outcome. That is not a weak signal, it is the wrong one, and it would
+       * corrupt exactly the comparison this table is for. A run that cannot be
+       * judged stays open and waits for an attempt that can.
+       *
+       * Strictly after, on a clock with one-second granularity, so an attempt
+       * opened in the very second a run began is not judged against it. That
+       * errs toward waiting: a run judged one attempt later costs a little
+       * latency, a run judged by an attempt that predates it costs the truth
+       * of every comparison drawn from this table afterwards.
+       */
+      const judgeable = awaitingResult.filter(run => run.startedAt < attempt.started_at);
+
+      for (const run of judgeable) {
         writes.push(completeRunStatement(run.id, judgeRun(run.expectedOutcome, {
           score,
           attention: diagnosis.isAttention,
@@ -464,7 +489,13 @@ export async function POST(request: Request) {
         const key = remediation ? interventionKeyForRemediation(remediation.action) : undefined;
         const intervention = key ? catalogue.get(remediation!.action) : undefined;
 
-        if (intervention) {
+        // One pending intervention per concept. A run left open above is one
+        // this attempt could not judge; stacking another on top of it would
+        // produce two runs that the next attempt resolves identically, which
+        // is a comparison of nothing against itself.
+        const stillPending = awaitingResult.length > judgeable.length;
+
+        if (intervention && !stillPending) {
           const expectedOutcome: ExpectedOutcome = {
             metric: 'mastery_score',
             subject,

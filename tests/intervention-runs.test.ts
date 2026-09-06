@@ -41,6 +41,22 @@ interface RunRow {
   decision_id: number | null;
 }
 
+/**
+ * The student going away and coming back.
+ *
+ * `takeQuiz` opens, answers and submits inside one second, so without this
+ * every follow-up attempt appears to start in the same second the run did —
+ * and a run is only judged by an attempt that began strictly after it. Real
+ * students take longer than a second to sit a second quiz; the tests have to
+ * say so rather than rely on how fast the suite runs.
+ */
+async function comeBackLater(seconds = 60) {
+  await executeSql(
+    `UPDATE intervention_runs SET started_at = datetime(started_at, $1) WHERE completed_at IS NULL`,
+    [`-${seconds} seconds`]
+  );
+}
+
 async function runs(): Promise<RunRow[]> {
   const result = await executeSql<RunRow>(
     `SELECT r.run_id, i.key AS intervention_key, r.reason, r.evidence, r.expected_outcome,
@@ -136,6 +152,7 @@ describe('failing a mastery check', () => {
 describe('the next attempt judges the prediction', () => {
   it('records met when the student reaches the target', async () => {
     await takeQuiz(token, 'math', DECIMALS, 1, 30_000);
+    await comeBackLater();
     await takeQuiz(token, 'math', DECIMALS, 5, 30_000);
 
     const [run] = await runs();
@@ -148,6 +165,7 @@ describe('the next attempt judges the prediction', () => {
 
   it('records not_met, and keeps the delta that says how close', async () => {
     await takeQuiz(token, 'math', DECIMALS, 1, 30_000);
+    await comeBackLater();
     await takeQuiz(token, 'math', DECIMALS, 3, 30_000);
 
     const [run] = await runs();
@@ -163,6 +181,7 @@ describe('the next attempt judges the prediction', () => {
     // Answered in under a second each: an attention signal, so this attempt is
     // evidence about focus and not about whether the intervention taught
     // anything. Scoring it against the material would blame the wrong cause.
+    await comeBackLater();
     await takeQuiz(token, 'math', DECIMALS, 1, 400);
 
     const [run] = await runs();
@@ -172,10 +191,87 @@ describe('the next attempt judges the prediction', () => {
 
   it('judges only the concept the run was about', async () => {
     await takeQuiz(token, 'math', DECIMALS, 1, 30_000);
+    await comeBackLater();
     await takeQuiz(token, 'math', FRACTIONS, 5, 30_000);
 
     const open = (await runs()).filter(run => run.completed_at === null);
     expect(open).toHaveLength(1);
+  });
+});
+
+/**
+ * Three ways the effectiveness data could be corrupted quietly, all found by
+ * review on the first version of this PR.
+ *
+ * Each of them writes an outcome that looks like evidence and is not, which is
+ * the worst failure this table can have: a comparison drawn from it would be
+ * confidently wrong, and nothing in the numbers would say so.
+ */
+describe('what must not be counted as an intervention working', () => {
+  it('will not judge a run with an attempt the student had already answered', async () => {
+    // Two quizzes open on the same concept. The second is answered *before*
+    // the first is submitted, so its answers contain no evidence about an
+    // intervention that did not exist yet.
+    const { POST: answerQuiz } = await import('../api/tutor/quiz/answer.js');
+    const { POST: submitQuiz } = await import('../api/tutor/quiz/submit.js');
+    const { answerKey, callAs } = await import('./helpers/database.js');
+
+    const first = await openQuiz(token, 'math', DECIMALS);
+    const second = await openQuiz(token, 'math', DECIMALS);
+
+    for (const quiz of [first, second]) {
+      for (const question of quiz.questions) {
+        const right = await answerKey(question.itemId);
+        await callAs(token, answerQuiz, {
+          attemptId: quiz.attemptId,
+          itemId: question.itemId,
+          chosen: ['A', 'B', 'C', 'D'].find(letter => letter !== right)!,
+          responseTimeMs: 30_000,
+        });
+      }
+    }
+
+    await callAs(token, submitQuiz, { attemptId: first.attemptId });
+    const opened = await runs();
+    expect(opened).toHaveLength(1);
+
+    await callAs(token, submitQuiz, { attemptId: second.attemptId });
+
+    const after = await runs();
+    // The run stays open and waits for an attempt that can actually speak to
+    // it. And no second run is stacked beside it, which would give the next
+    // attempt two runs to resolve identically.
+    expect(after).toHaveLength(1);
+    expect(after[0].outcome).toBeNull();
+  });
+
+  it('resolves that waiting run on the next attempt that begins after it', async () => {
+    // The other half: waiting must not mean never. Once a genuine follow-up
+    // arrives, the run is judged normally.
+    await takeQuiz(token, 'math', DECIMALS, 1, 30_000);
+    await comeBackLater();
+    await takeQuiz(token, 'math', DECIMALS, 5, 30_000);
+
+    const [run] = await runs();
+    expect(run.outcome).toBe('met');
+  });
+
+  it('does not hand a student a draft revision of an intervention', async () => {
+    const { findIntervention } = await import('../api/_lib/interventions.js');
+
+    // A newer version saved but not published. Selecting "anything not
+    // retired" would pick it, and it would start receiving real runs the
+    // moment someone saved it.
+    await executeSql(
+      `INSERT INTO interventions (key, type, target_kind, source, version, status)
+       VALUES ('engine.extra_practice', 'practice', 'concept', 'engine', 2, 'draft')`
+    );
+
+    const live = await findIntervention('engine.extra_practice');
+    expect(live?.version).toBe(1);
+    expect(live?.status).toBe('active');
+
+    await executeSql("DELETE FROM interventions WHERE key = 'engine.extra_practice' AND version = 2");
   });
 });
 
