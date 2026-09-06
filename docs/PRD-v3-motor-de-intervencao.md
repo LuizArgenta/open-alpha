@@ -5,6 +5,7 @@
 **Relação com os outros documentos:**
 
 - **[PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md)** permanece como está: é a **constituição do motor pedagógico**, e acerta em quatro decisões que este documento não revisa — motor determinístico antes do LLM, retenção como parte do domínio, diagnóstico de erro, e intervenção humana orientada por sinal. Explica de onde o projeto veio.
+- **Os três documentos permanecem separados**, por decisão — fundir a v2 aqui perderia o registro de como o produto foi entendido em cada fase, e a evolução é parte do que eles documentam.
 - **[PRD v2 — plataforma](./PRD-plataforma-de-aprendizagem.md)** tem duas metades. O **backlog de funcionalidades** continua válido e é referenciado pelo plano de execução. O **enquadramento de produto** — currículo → conceito → lição → prova → mastery → próximo conceito — é **substituído por este documento**. Não foi reescrito para preservar o registro; é aqui que se lê o que o produto é.
 
 Este documento não substitui mecanismos. Reinterpreta os que existem dentro de um laço maior.
@@ -294,7 +295,38 @@ adaptador de provedor
 
 **Estado atual:** `LLM_BASE_URL` é constante fixa apontando para a ATXP, **e o id do modelo está fixo em cinco lugares** como `claude-sonnet-4-6`. Trocar só a URL não basta: um servidor local compatível não expõe esse nome e recusa toda requisição. O item 0.3 precisa de seleção de modelo por capacidade, não de uma variável de ambiente. Ainda é pequeno; não é de cinco linhas, como esta seção afirmou antes. Política por escopo é outro tamanho e só paga quando houver escolas.
 
-**Tensão a decidir, não a descobrir:** a telemetria proposta registra invocação por aluno. O `recordUsage` atual **deliberadamente não guarda id de usuário**, para que o teto de gasto exista sem criar um log de quem perguntou o quê e quando — e `/data` afirma isso ao usuário. Se virar auditável por aluno, o aviso muda junto.
+### 7.1 Telemetria de invocação — decisão tomada
+
+A arquitetura-alvo pede auditoria por invocação. A pergunta era se esse registro carrega o aluno. **Decisão: não.**
+
+O `recordUsage` guarda `purpose`, `model` e tokens, **sem id de usuário** — para que o teto de gasto exista sem construir um log de quem perguntou o quê e quando. O `/data` afirma isso ao usuário, e a afirmação continua verdadeira.
+
+O motivo é que quase nada precisa da identidade:
+
+| Uso | Precisa de quem? |
+|---|---|
+| Teto de gasto | ❌ tokens e janela bastam |
+| Custo por escola, BYOK | `organization_id` — entidade pagante, não pessoa |
+| Depurar política de modelo | `policy_id`, `capability`, escopo |
+| Abuso | já coberto por `auth_attempts` e `guest_sessions` |
+| Comparar modelos por resultado de aprendizagem | ✅ **precisa** — e está adiado por decisão |
+
+**Acrescentar escopo, não pessoa.** `capability`, `policy_id`, `provider`, `latency_ms` e, quando houver escolas, `organization_id`.
+
+**Quando o vínculo for necessário, ele não é `student_id`.** É `attempt_id` ou `intervention_run_id`:
+
+- `attempt_id` diz **para que a chamada serviu** — uma tentativa, com começo e fim, já descrita no aviso. É delimitado.
+- `student_id` diz **esta pessoa fez chamadas**, e acumula ao longo de tudo que ela fizer. Isso é perfil.
+
+O primeiro responde *"esta explicação ajudou?"*. O segundo responde *"o que esta pessoa andou perguntando?"*. Só o primeiro é necessário para avaliar o motor.
+
+**E o `/data` muda no mesmo PR, nunca depois.** O aviso mudar em seguida é a falha: é o que transforma uma promessa em coisa que a pessoa não tem como saber que expirou.
+
+**Esta decisão ainda não é executável.** O teste do aviso de dados lê apenas `sqlite_master` — guarda classificação de **tabela**, não de coluna. Adicionar `student_id` a `llm_usage` amanhã passa no teste, e o `/data` segue afirmando que aquela tabela não guarda nada sobre pessoa. O invariante que falta é preciso e barato:
+
+> Uma tabela declarada impessoal não pode ter chave estrangeira para `users`.
+
+Sem ele, o que está escrito aqui é intenção, não garantia — e a garantia é o ponto.
 
 ## 8. Avaliação em três escalas
 
