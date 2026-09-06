@@ -406,6 +406,15 @@ export async function generateQuizQuestions(
 
   const prompt = `Generate ${count} multiple-choice quiz questions for a grade ${gradeLevel} student on the topic: ${conceptName} (${subject}).
 ${difficultyNote}${interestNote}
+Every wrong option must be wrong for a *nameable reason* — a mistake a real student
+in this grade actually makes. Do not pad with options nobody would pick: an option
+that is obviously absurd teaches nothing and tells us nothing when it is chosen.
+
+For each wrong option, give a short snake_case code naming the misunderstanding
+behind it. Reuse the same code when two questions probe the same misunderstanding,
+so that repeated mistakes can be recognised as one cause rather than three
+unrelated errors.
+
 Format each question as JSON:
 {
   "questions": [
@@ -413,10 +422,25 @@ Format each question as JSON:
       "question": "The question text",
       "options": ["A) option1", "B) option2", "C) option3", "D) option4"],
       "correctAnswer": "A",
-      "explanation": "Why this is the correct answer"
+      "explanation": "Why this is the correct answer",
+      "skillTag": "the specific skill this question tests, in snake_case",
+      "reasoningType": "recall | application | analysis",
+      "distractorErrorCode": {
+        "B": "snake_case_name_of_the_misunderstanding",
+        "C": "snake_case_name_of_the_misunderstanding",
+        "D": "snake_case_name_of_the_misunderstanding"
+      },
+      "distractorRationale": {
+        "B": "One sentence: why a student would choose this",
+        "C": "One sentence: why a student would choose this",
+        "D": "One sentence: why a student would choose this"
+      }
     }
   ]
 }
+
+distractorErrorCode and distractorRationale must name every wrong option and must
+not mention the correct answer. Use the same option labels as in "options".
 
 Make questions age-appropriate and progressively challenging.
 
