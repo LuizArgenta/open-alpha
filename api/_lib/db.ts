@@ -323,6 +323,47 @@ async function migrateAuthAttempts(): Promise<void> {
  * rate-limiting PR; ids are strings and run in array order, so a gap costs
  * nothing and a collision would cost a merge conflict.
  */
+/**
+ * Lets the server write to the event stream, and says who wrote each row.
+ *
+ * `learning_events` had exactly one writer: `progress/events.ts`, which the
+ * browser calls with `.catch(() => {})`. Everything the server knows for
+ * certain — an attempt opened, an answer graded, a quiz finalised, an attempt
+ * expired — never reached the stream at all, and a dropped browser request
+ * left no trace of the gap. A student who had just sat a quiz showed a streak
+ * of zero because of it.
+ *
+ * `source` makes provenance legible rather than assumed: a reader can tell a
+ * fact the server observed from one a browser reported. `attempt_id` is what
+ * makes an event joinable back to the evidence it describes.
+ *
+ * The CHECK is widened rather than dropped. `quiz_expired` is not
+ * `idle_timeout`: one is the server closing a stale attempt, the other is the
+ * browser noticing a person walked away, and collapsing them would lose the
+ * distinction the focus diagnosis depends on.
+ */
+async function migrateLearningEventSource(): Promise<void> {
+  const columns = await client.execute('PRAGMA table_info(learning_events)');
+  const existing = new Set(columns.rows.map(row => String(row.name)));
+
+  if (!existing.has('source')) {
+    await client.execute(
+      "ALTER TABLE learning_events ADD COLUMN source TEXT NOT NULL DEFAULT 'browser'"
+    );
+  }
+  if (!existing.has('attempt_id')) {
+    await client.execute('ALTER TABLE learning_events ADD COLUMN attempt_id INTEGER');
+  }
+
+  // SQLite cannot alter a CHECK in place, and rebuilding the table to widen an
+  // enum would risk the rows this migration exists to preserve. The constraint
+  // lives in the schema for new databases; existing ones are guarded by the
+  // application, which is the only writer.
+  await client.execute(
+    'CREATE INDEX IF NOT EXISTS learning_events_attempt ON learning_events(attempt_id)'
+  );
+}
+
 async function migrateLlmUsage(): Promise<void> {
   await client.execute(`CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -644,7 +685,13 @@ export async function initializeSchema(): Promise<void> {
       student_id INTEGER REFERENCES users(id),
       subject TEXT NOT NULL,
       concept_id TEXT NOT NULL,
-      event_type TEXT NOT NULL CHECK (event_type IN ('lesson_start', 'lesson_end', 'quiz_start', 'quiz_answer', 'quiz_complete', 'hint_request', 'idle_timeout')),
+      event_type TEXT NOT NULL CHECK (event_type IN ('lesson_start', 'lesson_end', 'quiz_start', 'quiz_answer', 'quiz_complete', 'quiz_expired', 'hint_request', 'idle_timeout')),
+      -- Who observed this. 'server' is a fact the engine knows; 'browser' is a
+      -- report that may never have arrived.
+      source TEXT NOT NULL DEFAULT 'browser',
+      -- What the event is about, when it is about an attempt. Joins the stream
+      -- back to the evidence.
+      attempt_id INTEGER,
       payload TEXT DEFAULT '{}',
       created_at TEXT DEFAULT (datetime('now'))
     );
@@ -1023,6 +1070,7 @@ export async function initializeSchema(): Promise<void> {
     { id: '005-xp-awards-attempt-id', run: migrateXpAwardsAttemptId },
     { id: '006-auth-attempts', run: migrateAuthAttempts },
     { id: '007-llm-usage', run: migrateLlmUsage },
+    { id: '008-learning-event-source', run: migrateLearningEventSource },
   ]);
 }
 

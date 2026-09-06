@@ -17,6 +17,7 @@ import {
 import { awardXp } from '../../_lib/xp.js';
 import { decisionStatement } from '../../_lib/decisions.js';
 import { ATTEMPT_DEADLINE_MODIFIER, attemptExpired, expireAttempt } from '../../_lib/attempts.js';
+import { recordEvent } from '../../_lib/events.js';
 
 interface AttemptRow {
   student_id: number;
@@ -401,12 +402,32 @@ export async function POST(request: Request) {
         await scope.run(write.sql, write.params);
       }
 
-      return { newScore, passed, diagnosis, xp, remediation };
+      return { score, newScore, passed, diagnosis, xp, remediation };
     });
 
     if (outcome === null) {
       return Response.json({ error: 'Attempt already finished' }, { status: 409 });
     }
+
+    // Outside the transaction and after it committed: the stream is evidence,
+    // not the source of truth, and holding the write lock across it is what
+    // PR #46 had to undo.
+    await recordEvent({
+      studentId: auth.userId,
+      subject,
+      conceptId,
+      type: 'quiz_complete',
+      attemptId,
+      payload: {
+        score: outcome.score,
+        passed: outcome.passed,
+        diagnosis: outcome.diagnosis.pattern,
+        xp: outcome.xp.amount,
+        ...(outcome.diagnosis.misconception
+          ? { misconception: outcome.diagnosis.misconception }
+          : {}),
+      },
+    });
 
     if (outcome.passed) {
       return Response.json({

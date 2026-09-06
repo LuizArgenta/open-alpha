@@ -3,6 +3,7 @@ import { LlmUnavailableError, unavailableResponse } from '../_lib/llm-budget.js'
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage, generateQuizQuestions } from '../_lib/llm.js';
 import { questionProblem } from '../_lib/curriculum-record.js';
+import { recordEvent } from '../_lib/events.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
 import { drawFromAuthoredItemBank, type AttemptQuestion, openAttempt, withoutAnswerKey } from '../_lib/assessment.js';
 import { expireStaleAttempts } from '../_lib/attempts.js';
@@ -63,6 +64,11 @@ export async function POST(request: Request) {
         source: 'authored',
         items: selected,
       });
+      await recordEvent({
+        studentId: auth.userId, subject, conceptId,
+        type: 'quiz_start', attemptId, payload: { source: 'authored', items: items.length },
+      });
+
       return Response.json({ attemptId, questions: items.map(withoutAnswerKey) });
     }
 
@@ -141,6 +147,11 @@ export async function POST(request: Request) {
       kind: 'mastery',
       source: 'generated',
       items: questions.map(question => ({ conceptId, question })),
+    });
+
+    await recordEvent({
+      studentId: auth.userId, subject, conceptId,
+      type: 'quiz_start', attemptId, payload: { source: 'generated', items: items.length },
     });
 
     return Response.json({ attemptId, questions: items.map(withoutAnswerKey) });
