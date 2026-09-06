@@ -10,7 +10,7 @@
  * still open next door.
  */
 
-import { executeSql, executeTransaction } from './db.js';
+import { executeSql, executeTransaction, withTransaction } from './db.js';
 import { selectMasteryItems, snapshotItem } from './item-bank.js';
 
 const poolSyncs = new Map<string, Promise<void>>();
@@ -190,6 +190,15 @@ export async function drawFromAuthoredItemBank(options: {
  *
  * `conceptId` is the concept being assessed for a mastery check, and '*' for a
  * placement, where no single concept is: the items carry their own.
+ *
+ * The attempt row and its item links are written as one unit. An attempt that
+ * exists with only some of its links is the dangerous partial state: the score
+ * divides by `COUNT(*)` over `assessment_attempt_items`, so a link that never
+ * landed silently shrinks the denominator and inflates the mark. Storing the
+ * items themselves stays outside the transaction on purpose — since the item
+ * bank they are content-addressed snapshots, so one left behind by a failure
+ * here is not garbage: it is a valid row the next request for the same content
+ * finds and reuses.
  */
 export async function openAttempt(options: {
   studentId: number;
@@ -200,26 +209,36 @@ export async function openAttempt(options: {
   source: 'authored' | 'generated';
   items: AttemptItem[];
 }): Promise<OpenedAttempt> {
+  // An attempt with no items scores 0/0 and would tell the engine the student
+  // failed a check they were never shown.
+  if (options.items.length === 0) {
+    throw new Error('Cannot open an attempt with no items');
+  }
+
   const itemIds: number[] = [];
   for (const item of options.items) {
     itemIds.push(await storeItem(options.subject, options.language, options.source, item));
   }
 
-  const attempt = await executeSql<{ id: number }>(
-    `INSERT INTO assessment_attempts (student_id, subject, concept_id, language, kind)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [options.studentId, options.subject, options.conceptId, options.language, options.kind]
-  );
-  const attemptId = attempt.rows[0].id;
-
-  // The server's own record of what this attempt consists of. Without it an
-  // answer could claim to belong to any attempt, or to any concept.
-  for (const [position, itemId] of itemIds.entries()) {
-    await executeSql(
-      'INSERT INTO assessment_attempt_items (attempt_id, item_id, position) VALUES ($1, $2, $3)',
-      [attemptId, itemId, position]
+  const attemptId = await withTransaction(async scope => {
+    const attempt = await scope.run<{ id: number }>(
+      `INSERT INTO assessment_attempts (student_id, subject, concept_id, language, kind)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [options.studentId, options.subject, options.conceptId, options.language, options.kind]
     );
-  }
+    const id = attempt.rows[0].id;
+
+    // The server's own record of what this attempt consists of. Without it an
+    // answer could claim to belong to any attempt, or to any concept.
+    for (const [position, itemId] of itemIds.entries()) {
+      await scope.run(
+        'INSERT INTO assessment_attempt_items (attempt_id, item_id, position) VALUES ($1, $2, $3)',
+        [id, itemId, position]
+      );
+    }
+
+    return id;
+  });
 
   return {
     attemptId,
