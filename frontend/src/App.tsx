@@ -6,6 +6,7 @@ import Header from './components/Header';
 import { LanguageProvider, useTranslation } from './i18n';
 import Landing from './pages/Landing';
 import Demo from './pages/Demo';
+import DataNotice from './pages/DataNotice';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import AuthCallback from './pages/AuthCallback';
@@ -122,6 +123,7 @@ function App() {
           <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/demo" element={<Demo />} />
+          <Route path="/data" element={<DataNotice />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/auth/callback" element={<AuthCallback />} />

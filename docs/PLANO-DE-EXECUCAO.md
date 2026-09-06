@@ -89,7 +89,11 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
 
 ## Marco 3 — Operação com vários alunos
 
-- [ ] **25. LGPD e proteção de menores** *(G)* — retenção por categoria, exportação, exclusão, aviso de privacidade em linguagem infantil e adulta, RIPD. **Não pode ser posterior num produto para menores.** Dividir em entregas técnicas menores (retenção, exportação, exclusão, aviso) em vez de um PR só; a revisão jurídica em si fica fora de PR (ver "Fora de PR").
+- [ ] **25. LGPD e proteção de menores** *(G)* — **parcial: o aviso saiu, as outras três entregas não.** Dividido em quatro entregas técnicas (retenção, exportação, exclusão, aviso), como este item já pedia; a revisão jurídica em si fica fora de PR (ver "Fora de PR").
+  - [x] **Aviso** — [PR #44](https://github.com/LuizArgenta/open-alpha/pull/44). Página `/data` dizendo tabela por tabela o que fica guardado e por quê, mais as duas coisas que um aviso costuma enterrar: **o sistema forma juízos sobre a pessoa** ("estava chutando", "tinha parado de prestar atenção") e **as conversas saem daqui para um provedor de modelo**. A lista é *dado*, não prosa, e `tests/data-notice.test.ts` a confronta com o schema real: tabela nova reprova o teste até alguém decidir se ela guarda algo sobre uma pessoa. Um aviso que envelhece calado é pior que nenhum — é uma promessa que ninguém está cumprindo, e a pessoa para quem foi escrito não tem como saber. Também diz o que **não** existe: sem exportação, sem exclusão automática, sem prazo de retenção.
+  - [ ] **Retenção por categoria**, **exportação** e **exclusão** — continuam pendentes, e o aviso admite isso em vez de omitir. As três precisam existir antes de qualquer uso por quem não seja adulto consentindo.
+  - [ ] **Linguagem infantil** — o aviso atual é para adulto. A versão para criança é outra escrita, não uma tradução.
+  - [ ] **RIPD** — fora de PR, depende da revisão jurídica.
 - [ ] **26. Log de auditoria append-only** *(M)* — logins, mudanças de papel, publicações e acessos administrativos a dados infantis.
 - [ ] **27. Console de Guide** *(G)* — fila de intervenções priorizadas, histórico, notas privadas, acordos com o aluno, separação entre observação e inferência algorítmica.
 - [ ] **28. Turmas, grupos e matrículas** *(M)* — uma escola não é um conjunto de famílias avulsas.
@@ -170,6 +174,8 @@ Coisas que a auditoria não listou e que o trabalho dos PRs #22–#26 revelou. R
 - **Conceito atribuído pelo cliente no nivelamento** (#26). Mesma família do #20, em endpoint diferente. Sugere varrer os outros endpoints que aceitam identificador vindo do navegador — é o item 16.
 - **`executeSql` liga parâmetros por ordem de aparição, não pelo número do `$N`.** Um placeholder repetido consome um argumento a menos e escreve na coluna errada sem falhar. Já mordeu duas vezes. Confirmado por uma segunda auditoria lendo `db.ts` linha a linha — **virou item formal, o 7**, com critérios de aceite específicos.
 - **Não havia nada entre as chamadas de modelo e a fatura.** 94% do currículo gera lição e prova sob demanda, e o `demo/chat.ts` faz isso para qualquer um com a URL, sem conta. Fechado no [PR #43](https://github.com/LuizArgenta/open-alpha/pull/43): teto de tokens por janela contado no banco, chave de desligamento (`LLM_ENABLED=false`), interruptor separado para o modo demo, e as cinco chamadas de modelo passando por um estrangulamento único — teto que um endpoint novo pode esquecer de consultar é teto que um endpoint novo vai esquecer de consultar.
+
+- **Um teste deixava mobília no banco compartilhado.** Todos os arquivos de teste dividem o mesmo banco de rascunho, e `sql-param-binding.test.ts` criava uma tabela `sql_binding_probe` que nunca apagava. Ninguém notou porque nada olhava o schema inteiro — até o teste do aviso de dados olhar, e encontrar uma tabela de teste se passando por parte do produto. Corrigido no #44; o padrão vale de lição: teste que cria estrutura no banco compartilhado limpa depois de si.
 
 - **Confiança do domínio ainda é 1.0 para prova e 0.6 para nivelamento, fixos.** É o item 23, e continua certo adiar até haver aluno real — mas o campo já existe e já é lido, então o dia em que houver dado ele está pronto.
 
