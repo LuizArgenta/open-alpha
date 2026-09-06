@@ -18,6 +18,17 @@ import { awardXp } from '../../_lib/xp.js';
 import { decisionStatement } from '../../_lib/decisions.js';
 import { ATTEMPT_DEADLINE_MODIFIER, attemptExpired, expireAttempt } from '../../_lib/attempts.js';
 import { recordEvent } from '../../_lib/events.js';
+import {
+  completeRunStatement,
+  findIntervention,
+  openRunsFor,
+  startRunStatement,
+} from '../../_lib/interventions.js';
+import {
+  type ExpectedOutcome,
+  interventionKeyForRemediation,
+  judgeRun,
+} from '../../_lib/intervention-contract.js';
 
 interface AttemptRow {
   student_id: number;
@@ -212,6 +223,26 @@ export async function POST(request: Request) {
     const remediationIfFailed = await buildRemediation(auth.userId, subject, conceptId);
 
     /**
+     * Interventions already running on this concept, and the catalogue entry
+     * for the one this attempt might start.
+     *
+     * Read out here for the same reason `buildRemediation` is: both are reads,
+     * and a read issued from inside a write transaction runs on another
+     * connection that libsql serialises behind this one's lock. Resolved
+     * unconditionally because whether they get *used* depends on how the
+     * attempt went, and finding that out is what the transaction is for.
+     */
+    const runsAwaitingResult = await openRunsFor(auth.userId, subject, conceptId);
+    const catalogue = new Map(await Promise.all(
+      ['review_prerequisites', 'sub_skill', 'simpler_explanation', 'extra_practice'].map(
+        async action => {
+          const key = interventionKeyForRemediation(action)!;
+          return [action, await findIntervention(key)] as const;
+        }
+      )
+    ));
+
+    /**
      * Everything below happens after the attempt is claimed, and that order is
      * the point.
      *
@@ -384,22 +415,83 @@ export async function POST(request: Request) {
         })
       );
 
-      if (!passed) {
-        writes.push(
-          decisionStatement({
-            studentId: auth.userId,
-            subject,
-            conceptId,
-            kind: 'remediation',
-            decision: remediation?.conceptId ?? remediation?.action ?? 'none',
-            reason: diagnosis.pattern,
-            inputs: { score, priorAttempts },
-          })
-        );
+      /**
+       * Every intervention still waiting on a result is judged against this
+       * attempt, before a new one is started.
+       *
+       * The prediction was written when the run began — "this student, at 40
+       * on this concept, should reach 80 on their next attempt" — so scoring
+       * it here is a comparison against something recorded in advance rather
+       * than a story told afterwards. That is the difference between this
+       * table and telemetry.
+       */
+      for (const run of runsAwaitingResult) {
+        writes.push(completeRunStatement(run.id, judgeRun(run.expectedOutcome, {
+          score,
+          attention: diagnosis.isAttention,
+        })));
       }
 
       for (const write of writes) {
         await scope.run(write.sql, write.params);
+      }
+
+      /**
+       * The remediation decision and the intervention run it starts, written
+       * last and together.
+       *
+       * Out of the `writes` list because the run has to name the decision that
+       * chose it, and that id only exists once the decision row is written —
+       * a challenge to one has to reach the other. Same transaction as
+       * everything above, for the reason the decisions already ride along: a
+       * write that lands without its justification is worse than one that
+       * fails.
+       */
+      if (!passed) {
+        const decision = await scope.run<{ id: number }>(
+          `INSERT INTO learning_decisions (student_id, subject, concept_id, kind, decision, reason, inputs)
+           VALUES ($1, $2, $3, 'remediation', $4, $5, $6) RETURNING id`,
+          [
+            auth.userId,
+            subject,
+            conceptId,
+            remediation?.conceptId ?? remediation?.action ?? 'none',
+            diagnosis.pattern,
+            JSON.stringify({ score, priorAttempts }),
+          ]
+        );
+
+        const key = remediation ? interventionKeyForRemediation(remediation.action) : undefined;
+        const intervention = key ? catalogue.get(remediation!.action) : undefined;
+
+        if (intervention) {
+          const expectedOutcome: ExpectedOutcome = {
+            metric: 'mastery_score',
+            subject,
+            conceptId,
+            baseline: score,
+            target: MASTERY_THRESHOLD,
+            within: 'next_attempt',
+          };
+
+          const start = startRunStatement({
+            interventionKey: intervention.key,
+            studentId: auth.userId,
+            subject,
+            conceptId,
+            reason: diagnosis.pattern,
+            evidence: {
+              score,
+              priorAttempts,
+              answers: answers.length,
+              ...(diagnosis.misconception ? { misconception: diagnosis.misconception } : {}),
+            },
+            expectedOutcome,
+            decisionId: Number(decision.rows[0].id),
+          }, intervention.id);
+
+          await scope.run(start.sql, start.params);
+        }
       }
 
       return { score, newScore, passed, diagnosis, xp, remediation };

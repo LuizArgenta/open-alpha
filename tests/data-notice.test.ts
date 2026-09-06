@@ -31,6 +31,10 @@ const HOLDS_NOTHING_ABOUT_A_PERSON = [
   'curriculum_concepts',
   'curriculum_subjects',
   'generated_lessons',
+  // The catalogue of what can be offered — types, targets, estimated minutes.
+  // Nobody's name is in it; who received what is intervention_runs, which is
+  // described in the notice.
+  'interventions',
   'llm_usage',
   'oauth_pkce',
   'staff_roles',
