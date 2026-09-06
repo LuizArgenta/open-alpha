@@ -27,6 +27,7 @@
  */
 
 import { executeSql } from '../_lib/db.js';
+import { type PublishOutcome, publishContribution } from '../_lib/publish-contribution.js';
 import { getAuthFromRequest } from '../_lib/auth.js';
 
 const CORS_HEADERS = {
@@ -167,11 +168,33 @@ export async function POST(request: Request) {
       reputationDelta = +10;
     }
 
+    let publication: PublishOutcome | undefined;
+
     if (newStatus !== contribution.status) {
       await executeSql(
         `UPDATE contributions SET status = $1, updated_at = datetime('now') WHERE id = $2`,
         [newStatus, body.contributionId]
       );
+
+      /**
+       * Approval used to be the end of the line: the status changed and the
+       * contribution sat there forever, because nothing ever wrote 'deployed'.
+       * Peer review is the gate for an open curriculum, so clearing it is what
+       * puts the work in front of students.
+       *
+       * Publication can still refuse — the merged mastery check is validated
+       * with the same rule that guards authored and generated items, and two
+       * reviewers approving does not make a broken question answerable. The
+       * reason travels back in the response instead of vanishing.
+       */
+      if (newStatus === 'approved') {
+        publication = await publishContribution(body.contributionId);
+        if (!publication.published) {
+          console.error(
+            `Contribution ${body.contributionId} approved but not published: ${publication.reason}`
+          );
+        }
+      }
 
       // Update contributor reputation
       if (reputationDelta !== 0) {
@@ -194,10 +217,15 @@ export async function POST(request: Request) {
         reviewRecorded: true,
         contributionId: body.contributionId,
         yourDecision: body.decision,
-        newStatus,
+        newStatus: publication?.published ? 'deployed' : newStatus,
         votesSoFar: { approve: approveCount, reject: rejectCount },
-        message: newStatus === 'approved'
-          ? 'Contribution approved! It will be deployed to students in the next update.'
+        ...(publication ? { publication } : {}),
+        // The old message promised deployment "in the next update". There was
+        // no next update: nothing ever published. It now says what happened.
+        message: publication?.published
+          ? `Contribution approved and live: ${publication.questionsAdded} question(s) are now part of this concept's mastery check.`
+          : newStatus === 'approved'
+          ? `Contribution approved, but not published: ${publication?.reason ?? 'unknown reason'}.`
           : newStatus === 'rejected'
           ? 'Contribution rejected. The contributor has been notified with your feedback.'
           : 'Review recorded. Contribution remains in queue pending more reviews.',

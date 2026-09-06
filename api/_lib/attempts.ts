@@ -14,6 +14,7 @@
  */
 
 import { executeSql, executeTransaction } from './db.js';
+import { recordEvent } from './events.js';
 
 export const ATTEMPT_LIFETIME_MINUTES = 120;
 
@@ -44,6 +45,14 @@ export async function expireStaleAttempts(studentId: number): Promise<number> {
  * request was refused.
  */
 export async function expireAttempt(attemptId: number): Promise<void> {
+  // Read before the write, so the event can name what expired. An attempt that
+  // times out is a different fact from a browser reporting the person walked
+  // away, and the stream keeps them apart.
+  const attempt = await executeSql<{ student_id: number; subject: string; concept_id: string }>(
+    'SELECT student_id, subject, concept_id FROM assessment_attempts WHERE id = $1 AND finished_at IS NULL',
+    [attemptId]
+  );
+
   // Queued rather than issued bare, for the same reason the answer insert is:
   // a lone write racing another request's write transaction gets SQLITE_BUSY,
   // and the student sees "something broke" for an attempt that merely timed
@@ -57,6 +66,17 @@ export async function expireAttempt(attemptId: number): Promise<void> {
       params: [attemptId],
     },
   ]);
+
+  const row = attempt.rows[0];
+  if (row) {
+    await recordEvent({
+      studentId: row.student_id,
+      subject: row.subject,
+      conceptId: row.concept_id,
+      type: 'quiz_expired',
+      attemptId,
+    });
+  }
 }
 
 /** 410: the attempt existed and is gone, which is exactly what happened. */

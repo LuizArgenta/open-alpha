@@ -2,6 +2,8 @@ import { executeSql } from '../_lib/db.js';
 import { LlmUnavailableError, unavailableResponse } from '../_lib/llm-budget.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage, generateQuizQuestions } from '../_lib/llm.js';
+import { questionProblem } from '../_lib/curriculum-record.js';
+import { recordEvent } from '../_lib/events.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
 import { drawFromAuthoredItemBank, type AttemptQuestion, openAttempt, withoutAnswerKey } from '../_lib/assessment.js';
 import { expireStaleAttempts } from '../_lib/attempts.js';
@@ -62,6 +64,11 @@ export async function POST(request: Request) {
         source: 'authored',
         items: selected,
       });
+      await recordEvent({
+        studentId: auth.userId, subject, conceptId,
+        type: 'quiz_start', attemptId, payload: { source: 'authored', items: items.length },
+      });
+
       return Response.json({ attemptId, questions: items.map(withoutAnswerKey) });
     }
 
@@ -105,6 +112,33 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Failed to generate quiz' }, { status: 500 });
     }
 
+    /**
+     * Generated questions used to reach the student with no checking at all —
+     * straight from JSON.parse into the attempt. The answerability rule that
+     * `curriculum-record.ts` enforces only ever ran on authored content, which
+     * is 6% of the curriculum; the model's output, which is the other 94%,
+     * went unchecked.
+     *
+     * An item whose correctAnswer matches none of its options is failed by
+     * every student forever, and the engine reads that as a knowledge gap and
+     * sends them back to a prerequisite they already know. Refusing the quiz
+     * is worse than serving a good one and better than serving that.
+     */
+    const rejected = questions
+      .map((question, index) => questionProblem(
+        question as unknown as Record<string, unknown>,
+        `generated[${index}]`
+      ))
+      .filter((problem): problem is string => problem !== undefined);
+
+    if (rejected.length > 0) {
+      console.error('Rejected generated quiz:', rejected.join('; '));
+      return Response.json(
+        { error: 'The generated quiz did not pass validation. Please try again.' },
+        { status: 502 }
+      );
+    }
+
     const { attemptId, items } = await openAttempt({
       studentId: auth.userId,
       subject,
@@ -113,6 +147,11 @@ export async function POST(request: Request) {
       kind: 'mastery',
       source: 'generated',
       items: questions.map(question => ({ conceptId, question })),
+    });
+
+    await recordEvent({
+      studentId: auth.userId, subject, conceptId,
+      type: 'quiz_start', attemptId, payload: { source: 'generated', items: items.length },
     });
 
     return Response.json({ attemptId, questions: items.map(withoutAnswerKey) });

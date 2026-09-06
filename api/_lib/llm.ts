@@ -1,12 +1,14 @@
 import OpenAI from 'openai';
 import { assertLlmAvailable, recordUsage } from './llm-budget.js';
-
-const LLM_BASE_URL = 'https://llm.atxp.ai/v1';
+import { modelEndpoint, modelFor } from './model-policy.js';
 
 let client: OpenAI | null = null;
+/** Cached against what it was built for, so changing the endpoint takes. */
+let clientEndpoint: string | null = null;
 
 function getClient(): OpenAI {
-  if (client) return client;
+  const endpoint = modelEndpoint();
+  if (client && clientEndpoint === endpoint) return client;
 
   const connectionString = process.env.ATXP_CONNECTION_STRING;
   if (!connectionString) {
@@ -14,9 +16,10 @@ function getClient(): OpenAI {
   }
 
   client = new OpenAI({
-    baseURL: LLM_BASE_URL,
+    baseURL: endpoint,
     apiKey: connectionString,
   });
+  clientEndpoint = endpoint;
 
   return client;
 }
@@ -170,7 +173,7 @@ Guidelines:
 export async function chatWithTutor(
   messages: ChatMessage[],
   context: TutorContext,
-  model: string = 'claude-sonnet-4-6'
+  model: string = modelFor('tutor_chat')
 ): Promise<string> {
   const openai = getClient();
 
@@ -193,7 +196,7 @@ export async function chatWithTutor(
 export async function chatWithCoach(
   messages: ChatMessage[],
   context: CoachContext,
-  model: string = 'claude-sonnet-4-6'
+  model: string = modelFor('coach_chat')
 ): Promise<string> {
   const openai = getClient();
 
@@ -318,7 +321,7 @@ Rules:
 
 export async function generateLesson(
   ctx: LessonGenerationContext,
-  model: string = 'claude-sonnet-4-6'
+  model: string = modelFor('lesson_generation')
 ): Promise<GeneratedLessonContent> {
   const openai = getClient();
 
@@ -349,7 +352,7 @@ export async function generateLesson(
 export async function translateLesson(
   lesson: GeneratedLessonContent,
   language: ContentLanguage,
-  model: string = 'claude-sonnet-4-6'
+  model: string = modelFor('lesson_translation')
 ): Promise<GeneratedLessonContent> {
   const openai = getClient();
 
@@ -406,6 +409,15 @@ export async function generateQuizQuestions(
 
   const prompt = `Generate ${count} multiple-choice quiz questions for a grade ${gradeLevel} student on the topic: ${conceptName} (${subject}).
 ${difficultyNote}${interestNote}
+Every wrong option must be wrong for a *nameable reason* — a mistake a real student
+in this grade actually makes. Do not pad with options nobody would pick: an option
+that is obviously absurd teaches nothing and tells us nothing when it is chosen.
+
+For each wrong option, give a short snake_case code naming the misunderstanding
+behind it. Reuse the same code when two questions probe the same misunderstanding,
+so that repeated mistakes can be recognised as one cause rather than three
+unrelated errors.
+
 Format each question as JSON:
 {
   "questions": [
@@ -413,17 +425,32 @@ Format each question as JSON:
       "question": "The question text",
       "options": ["A) option1", "B) option2", "C) option3", "D) option4"],
       "correctAnswer": "A",
-      "explanation": "Why this is the correct answer"
+      "explanation": "Why this is the correct answer",
+      "skillTag": "the specific skill this question tests, in snake_case",
+      "reasoningType": "recall | application | analysis",
+      "distractorErrorCode": {
+        "B": "snake_case_name_of_the_misunderstanding",
+        "C": "snake_case_name_of_the_misunderstanding",
+        "D": "snake_case_name_of_the_misunderstanding"
+      },
+      "distractorRationale": {
+        "B": "One sentence: why a student would choose this",
+        "C": "One sentence: why a student would choose this",
+        "D": "One sentence: why a student would choose this"
+      }
     }
   ]
 }
+
+distractorErrorCode and distractorRationale must name every wrong option and must
+not mention the correct answer. Use the same option labels as in "options".
 
 Make questions age-appropriate and progressively challenging.
 
 ${languageInstruction(language)}`;
 
   const response = await complete('quiz_generation', {
-    model: 'claude-sonnet-4-6',
+    model: modelFor('quiz_generation'),
     messages: [{ role: 'user', content: prompt }],
     max_tokens: 2048,
     temperature: 0.8,
