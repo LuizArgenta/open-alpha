@@ -151,6 +151,9 @@ describe('persisted item bank', () => {
                'Legacy stem', '["A) no","B) yes"]', 'B', 'Because yes.', NULL, 2, 'active')`
     );
 
+    // An interrupted migration is never recorded, so it resumes on the next
+    // start — which is exactly the state this row is standing in for.
+    await executeSql("DELETE FROM _schema_migrations WHERE id = '002-assessment-item-bank'");
     await initializeSchema();
     const migrated = await executeSql<{ content_hash: string; version: number; status: string }>(
       `SELECT content_hash, version, status FROM assessment_items

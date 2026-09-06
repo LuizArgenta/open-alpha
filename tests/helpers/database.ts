@@ -40,6 +40,20 @@ export async function resetDatabase(): Promise<void> {
   }
 }
 
+/**
+ * Makes the database look like one that has not applied a given migration.
+ *
+ * Migrations run once and are recorded, so a test that recreates a table in
+ * its pre-migration shape has to drop the record too — otherwise it is not
+ * simulating an old database, it is simulating a database someone vandalised
+ * behind the migrator's back, which the migrator is not meant to repair. An
+ * interrupted migration is never recorded either, which is why a resumable
+ * one gets a second chance on the next start.
+ */
+export async function forgetMigration(id: string): Promise<void> {
+  await executeSql('DELETE FROM _schema_migrations WHERE id = $1', [id]);
+}
+
 export async function createUser(
   role: 'student' | 'parent',
   gradeLevel: number | null = 4
