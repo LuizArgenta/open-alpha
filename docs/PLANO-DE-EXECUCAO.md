@@ -195,6 +195,8 @@ Coisas que a auditoria não listou e que o trabalho dos PRs #22–#26 revelou. R
 
 - **O oráculo de temporização, medido e não só testado.** Antes de mesclar o #40 subi o servidor e cronometrei: conta existente com senha errada e conta inexistente respondem em **94 ms as duas**, média de cinco. Era a afirmação central de segurança do PR e ela se sustenta fora do teste unitário. O limite dispara na 9ª falha, como documentado — e vale registrar o custo real: **durante o bloqueio de 15 minutos até a senha certa recebe 429.** É o comportamento pretendido, mas é o cenário "tranca gente de verdade", e quem operar o piloto precisa saber disso antes de o primeiro aluno ligar reclamando.
 
+- **Vulnerabilidades de dependência, medidas em três etapas.** Antes do #41 eram **44** em produção, com 26 altas e 2 críticas. Apagar o `backend/` obsoleto levou a **5** — toda a cadeia Expo/metro vivia sob `backend/node_modules`. O `npm audit fix` sem `--force` levou a **2** (`form-data` CRLF, `ws` divulgação de memória e DoS, `@remix-run/router`). As **2 que sobram são do `react-router`** e só saem com major: isso é atualização de código, não tarefa de manutenção, e fica como PR próprio deliberado em vez de entrar de carona num `--force`.
+
 - **Confiança do domínio ainda é 1.0 para prova e 0.6 para nivelamento, fixos.** É o item 23, e continua certo adiar até haver aluno real — mas o campo já existe e já é lido, então o dia em que houver dado ele está pronto.
 
 Da segunda auditoria, mais três achados que não viram item numerado por serem P1 (não bloqueiam aluno real sozinhos, mas valem registro para não se perderem):
