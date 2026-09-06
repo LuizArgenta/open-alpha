@@ -293,6 +293,28 @@ async function applyMigrations(migrations: Migration[]): Promise<void> {
 }
 
 /**
+ * The table the login and signup limits count in, plus the index they count
+ * with — without it every attempt scans the whole table, which is a denial of
+ * service wearing the costume of a defence against one.
+ *
+ * Old rows are swept on write rather than by a cron serverless does not have:
+ * the counter only ever asks about the last few minutes, so anything past the
+ * window is dead weight and a growing privacy liability.
+ */
+async function migrateAuthAttempts(): Promise<void> {
+  await client.execute(`CREATE TABLE IF NOT EXISTS auth_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL CHECK (scope IN ('login', 'signup')),
+    kind TEXT NOT NULL CHECK (kind IN ('email', 'ip')),
+    identifier TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  await client.execute(`CREATE INDEX IF NOT EXISTS auth_attempts_lookup
+    ON auth_attempts(scope, kind, identifier, created_at)`);
+}
+
+/**
  * Ties an XP award to the attempt that earned it.
  *
  * Without the column, "one award per attempt" is only as strong as the code
@@ -748,6 +770,16 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Failed authentication attempts, for rate limiting. Identifiers are
+    -- peppered SHA-256, never the email or IP itself.
+    CREATE TABLE IF NOT EXISTS auth_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT NOT NULL CHECK (scope IN ('login', 'signup')),
+      kind TEXT NOT NULL CHECK (kind IN ('email', 'ip')),
+      identifier TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     -- Guest sessions for demo mode (no account required)
     CREATE TABLE IF NOT EXISTS guest_sessions (
       id TEXT PRIMARY KEY,
@@ -954,6 +986,7 @@ export async function initializeSchema(): Promise<void> {
     { id: '003-generated-lessons-per-language', run: migrateGeneratedLessonsToPerLanguage },
     { id: '004-assessment-responses-unique', run: ensureAssessmentResponsesUniqueConstraint },
     { id: '005-xp-awards-attempt-id', run: migrateXpAwardsAttemptId },
+    { id: '006-auth-attempts', run: migrateAuthAttempts },
   ]);
 }
 
