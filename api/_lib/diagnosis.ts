@@ -31,6 +31,7 @@ export function rapidAnswerThresholdMs(difficulty?: string): number {
 export type ErrorPattern =
   | 'rapid_guessing'
   | 'distraction'
+  | 'recurring_misconception'
   | 'conceptual_gap'
   | 'high_difficulty'
   | 'inconclusive';
@@ -40,6 +41,13 @@ export interface AnswerEvent {
   responseTimeMs?: number;
   /** SQLite timestamp of the answer. */
   at: string;
+  /**
+   * The misunderstanding behind the option the student picked, when the item
+   * records one and the answer was wrong. Absent for correct answers, for
+   * items authored before this was collected, and whenever the model did not
+   * name one — absence means "not recorded", never "no shared cause".
+   */
+  errorCode?: string;
 }
 
 export interface QuizAttemptSignals {
@@ -50,8 +58,19 @@ export interface QuizAttemptSignals {
   rapidThresholdMs: number;
 }
 
+export interface RecurringMisconception {
+  code: string;
+  count: number;
+}
+
 export interface Diagnosis {
   pattern: ErrorPattern;
+  /**
+   * Set when several wrong answers came from the same misunderstanding. This
+   * is the difference between "got three wrong" and "got three wrong for one
+   * reason" — the second names something teachable.
+   */
+  misconception?: RecurringMisconception;
   /**
    * True when the failure is about attention rather than knowledge. Prerequisite
    * remediation is the wrong response to these — the score doesn't yet say
@@ -98,6 +117,39 @@ export function attemptFocusScore(
   return Math.max(0, 100 - penalty);
 }
 
+/** Two wrong answers from one cause is a pattern; one is an accident. */
+const MISCONCEPTION_MIN = 2;
+
+/**
+ * The misunderstanding behind more than one wrong answer, if there is one.
+ *
+ * Rapid answers are excluded deliberately. The option someone picks in two
+ * seconds says nothing about what they believe, so counting its error code
+ * would manufacture a misconception out of a guess — and the remediation for a
+ * misconception is a lesson, which is the wrong answer to inattention.
+ */
+function recurringMisconception(
+  answers: AnswerEvent[],
+  rapidThresholdMs: number
+): RecurringMisconception | undefined {
+  const counts = new Map<string, number>();
+
+  for (const answer of answers) {
+    if (answer.correct || answer.errorCode === undefined) continue;
+    const wasRapid = answer.responseTimeMs !== undefined && answer.responseTimeMs < rapidThresholdMs;
+    if (wasRapid) continue;
+    counts.set(answer.errorCode, (counts.get(answer.errorCode) ?? 0) + 1);
+  }
+
+  let dominant: RecurringMisconception | undefined;
+  for (const [code, count] of counts) {
+    if (count >= MISCONCEPTION_MIN && (dominant === undefined || count > dominant.count)) {
+      dominant = { code, count };
+    }
+  }
+  return dominant;
+}
+
 export function diagnoseAttempt({
   answers,
   priorAttempts,
@@ -131,6 +183,26 @@ export function diagnoseAttempt({
       pattern: 'distraction',
       isAttention: true,
       messageKey: 'diagnosis.distraction',
+    };
+  }
+
+  /**
+   * Checked before the wrong-answer ratio, because a shared cause is worth
+   * naming even when most of the quiz went right: three of five correct with
+   * both mistakes from one misunderstanding is a teachable moment, and the
+   * ratio gate would have called it inconclusive.
+   *
+   * Checked after the attention patterns, because if the student was guessing
+   * or had walked away, the options they picked are not beliefs.
+   */
+  const misconception = recurringMisconception(answers, rapidThresholdMs);
+  if (misconception !== undefined) {
+    return {
+      pattern: 'recurring_misconception',
+      isAttention: false,
+      misconception,
+      messageKey: 'diagnosis.recurringMisconception',
+      messageParams: { count: misconception.count },
     };
   }
 

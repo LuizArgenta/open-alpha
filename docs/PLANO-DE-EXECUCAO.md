@@ -4,7 +4,9 @@ Quadro de acompanhamento do que falta para o Open Alpha ser usável de verdade p
 
 **Como manter:** marque a caixa quando o PR for **mergeado**, não quando for aberto, e anote o número do PR ao lado. Se um item se revelar desnecessário ou mudar de forma, edite a linha e diga por quê — um item riscado sem explicação vira dúvida daqui a três meses.
 
-Documentos relacionados: [PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md) · [PRD v2 — evidência, autoria e motivação](./PRD-plataforma-de-aprendizagem.md) · [Plano de deploy para teste](./PLANO-DEPLOY-TESTE.md)
+Documentos relacionados: [**PRD v3 — motor de intervenção**](./PRD-v3-motor-de-intervencao.md) · [PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md) · [PRD v2 — evidência, autoria e motivação](./PRD-plataforma-de-aprendizagem.md) · [Plano de deploy para teste](./PLANO-DEPLOY-TESTE.md)
+
+> **Este plano continua válido como registro do que foi feito e como lista dos itens de integridade, segurança e LGPD ainda abertos.** A ordem do que vem a seguir passou a ser a da [fila de ondas do PRD v3](./PRD-v3-motor-de-intervencao.md#10-fila-de-prs), que reinterpreta os itens 19 a 24 dentro do laço evidência → decisão → intervenção → resultado. Os itens deste plano não foram renumerados: quando um deles é absorvido por uma onda, a linha diz qual.
 
 ---
 
@@ -20,7 +22,7 @@ Da segunda auditoria, já mergeados: [#28](https://github.com/LuizArgenta/open-a
 
 [#32](https://github.com/LuizArgenta/open-alpha/pull/32) trouxe o banco de itens (item 19) e o núcleo do item 10; auditado no próprio PR antes de mesclar, com o conflito em `db.ts` resolvido preservando as três migrações. [#34](https://github.com/LuizArgenta/open-alpha/pull/34) fechou o item 11 e a API de transação com callback que os itens 9 e 11 precisavam, [#35](https://github.com/LuizArgenta/open-alpha/pull/35) fechou o item 9 — de quebra, tapando uma exposição a `SQLITE_BUSY` que existia desde o PR #22 — [#36](https://github.com/LuizArgenta/open-alpha/pull/36) fechou o item 10 e [#37](https://github.com/LuizArgenta/open-alpha/pull/37) fechou o item 12 — **com isso a metade de integridade do Marco 1 (itens 1 a 12) está inteira** — [#38](https://github.com/LuizArgenta/open-alpha/pull/38) endureceu a cadeia de build (item 18, metade que sai por PR) e [#39](https://github.com/LuizArgenta/open-alpha/pull/39) fechou a varredura de IDOR (item 16).
 
-**341 testes** em `main`, contra 160 quando este plano foi escrito.
+**408 testes** em `main`, contra 160 quando este plano foi escrito.
 
 **Cobertura de conteúdo autorado, medida e não estimada:** dos **141 conceitos**, apenas **9** têm `masteryCheck`. Todos os 9 têm `id` estável e ≥5 itens, então o banco de itens do #32 não regride nada — mas quer dizer que os itens 19 a 21 valem hoje para **6% do currículo**. Os outros 94% caem na geração por LLM. Nenhum algoritmo de seleção conserta isso; é trabalho de autoria, e está registrado em "Fora de PR".
 
@@ -89,11 +91,11 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
 ## Marco 2 — Tutor local confiável
 
 - [x] **19. Banco de itens** *(G)* — pool por habilidade em vez de 5 questões fixas, com dificuldade, distratores ligados a erros conhecidos e versão do item registrada em cada tentativa. **Destrava 20, 21 e 23.** **[PR #32](https://github.com/LuizArgenta/open-alpha/pull/32) mesclado.** Chegou fora da ordem desta lista: a sequência dizia "só então 19 em diante" e o trabalho aconteceu antes. Registrado assim em vez de reescrever a história.
-- [ ] **20. Seleção de itens** *(M)* — não repetir item recente, limitar exposição, sortear por dificuldade. Depende do 19. Desenho detalhado em [Desenho do item 20](./DESENHO-ITEM-20-selecao-de-itens.md). **Alerta de precedência:** o pool mínimo hoje é 5 e o sorteio pede 5 — com pool de exatamente 5 não existe escolha nenhuma, e as três restrições ficam insatisfazíveis por construção. Item 20 sem autoria de itens é código sem efeito.
-- [ ] **21. Nivelamento adaptativo** *(G)* — próxima questão escolhida pelas anteriores, regra estatística de parada, intervalo de confiança, retomada em outro dia. Depende do 19.
+- [ ] **20. Seleção de itens** *(M)* — não repetir item recente, limitar exposição, sortear por dificuldade. Depende do 19. Desenho detalhado em [Desenho do item 20](./DESENHO-ITEM-20-selecao-de-itens.md). **Alerta de precedência:** o pool mínimo hoje é 5 e o sorteio pede 5 — com pool de exatamente 5 não existe escolha nenhuma, e as três restrições ficam insatisfazíveis por construção. Item 20 sem autoria de itens é código sem efeito. → **onda 1 do v3** (a seleção passa a escolher uma *intervenção*, não só um item; e depende de autoria, hoje em 6%).
+- [ ] **21. Nivelamento adaptativo** *(G)* — próxima questão escolhida pelas anteriores, regra estatística de parada, intervalo de confiança, retomada em outro dia. Depende do 19. → **onda 2 do v3**, junto do benchmark: as duas medem com instrumento independente.
 - [ ] **22. Geração de lições em lote para árvores novas** *(M)* — item C5 do PRD v2, não entregue. ⚠️ **Bloqueado, não apenas "não verificável":** sem credenciais ATXP não dá para implementar nem testar. Ou alguém consegue a credencial, ou o item sai da fila e volta quando houver — deixá-lo listado como se fosse executável distorce todo cálculo de quanto falta.
-- [ ] **23. Modelo probabilístico de domínio** *(G)* — BKT ou Elo educacional, com incerteza e decaimento. ⚠️ **Adiar até haver dados reais:** calibrar sem alunos é ajustar parâmetros no vácuo.
-- [ ] **24. Planejador diário de atividades** *(G)* — fila misturando novidade, revisão e remediação. Só vale a pena depois do 23.
+- [ ] **23. Modelo probabilístico de domínio** *(G)* — BKT ou Elo educacional, com incerteza e decaimento. ⚠️ **Adiar até haver dados reais:** calibrar sem alunos é ajustar parâmetros no vácuo. → **onda 2/3 do v3**. Continua certo adiar; o `mastery_confidence` fixo em 1.0 é o campo à espera dele.
+- [ ] **24. Planejador diário de atividades** *(G)* — fila misturando novidade, revisão e remediação. Só vale a pena depois do 23. → **onda 1 do v3**: é o `nextAction` aplicado ao dia inteiro.
 
 ## Marco 3 — Operação com vários alunos
 
@@ -102,18 +104,18 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
   - [ ] **Retenção por categoria**, **exportação** e **exclusão** — continuam pendentes, e o aviso admite isso em vez de omitir. As três precisam existir antes de qualquer uso por quem não seja adulto consentindo.
   - [ ] **Linguagem infantil** — o aviso atual é para adulto. A versão para criança é outra escrita, não uma tradução.
   - [ ] **RIPD** — fora de PR, depende da revisão jurídica.
-- [ ] **26. Log de auditoria append-only** *(M)* — logins, mudanças de papel, publicações e acessos administrativos a dados infantis.
-- [ ] **27. Console de Guide** *(G)* — fila de intervenções priorizadas, histórico, notas privadas, acordos com o aluno, separação entre observação e inferência algorítmica.
+- [ ] **26. Log de auditoria append-only** *(M)* — logins, mudanças de papel, publicações e acessos administrativos a dados infantis. → **não é absorvido pela onda 0.2**, ao contrário do que esta linha dizia. O `CHECK` de `learning_events` só admite tipos de atividade de aprendizagem (`lesson_start`…`idle_timeout`); login, mudança de papel, publicação de currículo e acesso administrativo não cabem lá. Este item precisa de tabela append-only própria, e continua sem entrega planejada. Apontado na revisão do #51.
+- [ ] **27. Console de Guide** *(G)* — fila de intervenções priorizadas, histórico, notas privadas, acordos com o aluno, separação entre observação e inferência algorítmica. → **onda 3 do v3** (fila de intervenções do professor). Depende de 0.1.
 - [ ] **28. Turmas, grupos e matrículas** *(M)* — uma escola não é um conjunto de famílias avulsas.
 - [ ] **29. Painel do responsável completo** *(M)* — metas, limites de uso, exportação, controle de compartilhamento.
-- [ ] **30. Telemetria e observabilidade** *(M)* — schema único de eventos, painel de saúde, alerta de backup vencido.
+- [ ] **30. Telemetria e observabilidade** *(M)* — schema único de eventos, painel de saúde, alerta de backup vencido. → **ondas 0.2 e 1.2 do v3** (contrato canônico de evento).
 - [x] **31. Backup e restauração testados** *(M)* — [PR #42](https://github.com/LuizArgenta/open-alpha/pull/42). `npm run backup` e `npm run restore`, sobre `VACUUM INTO` — cópia consistente enquanto outras conexões leem, que `cp` não dá. **A metade que costuma faltar é a que este item pedia:** todo snapshot é *aberto e inspecionado* antes do comando dizer que deu certo, e o restore confere o arquivo **antes** de mexer em qualquer coisa; um restore que instala arquivo ilegível transforma uma queda recuperável em irrecuperável. O banco substituído é renomeado, não apagado — restaurar é quando menos se pode pagar um segundo erro. Recusa banco remoto em vez de fingir: um Turso remoto não é nosso para copiar com consistência, e ele tem backup próprio. 14 testes, incluindo o ciclo perda→restauração; verificado também pelos comandos reais contra o schema de verdade, não só pela biblioteca.
 
 ## Marco 4 — Plataforma equivalente
 
 - [ ] **32. API versionada, OpenAPI, erros padronizados** *(M)* — o VISION.md promete "API-first" desde o início.
 - [ ] **33. Distribuição local** *(G)* — Docker reproduzível, modo offline, LLM local por API compatível, chave de bloqueio de tráfego externo. **Antecipar para antes do piloto local**, junto do item 31. **Primeira metade feita** em [PR #41](https://github.com/LuizArgenta/open-alpha/pull/41): `Dockerfile`, servidor que roda os handlers de `api/` fora da Vercel, SQLite em volume, validação de ambiente no boot. Falta modo offline e LLM local — ver [plano de deploy](./PLANO-DEPLOY-TESTE.md).
-- [ ] **34. Padrões 1EdTech** *(G)* — OneRoster, CASE, QTI, Caliper.
+- [ ] **34. Padrões 1EdTech** *(G)* — OneRoster, CASE, QTI, Caliper. → **onda 4 do v3**, e só com instituição que justifique.
 - [ ] **35. Aplicativos por matéria** *(XG)* — editor matemático com rascunho e passos, leitor com fluência, editor de texto com rubricas, simulações. **É aqui que mora a diferença real para a Alpha, e cada matéria é praticamente um produto.**
 
 ---
@@ -194,6 +196,12 @@ Coisas que a auditoria não listou e que o trabalho dos PRs #22–#26 revelou. R
 - **O healthcheck do contêiner não podia falhar.** `/api/health/schema` exigia autenticação; a sonda do Docker é um `fetch` nu sem credencial que lê o status, recebia 401, e 401 não é 503 — então reportava saudável em toda instância, inclusive numa com migração falha, que é o único caso para o qual o endpoint existe. Verde falso é pior que vermelho: um contêiner que nunca fica saudável se descobre no primeiro deploy; um sempre saudável se descobre com aluno já respondendo prova contra schema pela metade. Corrigido dentro do [PR #41](https://github.com/LuizArgenta/open-alpha/pull/41) — o código de status é público, o diagnóstico não.
 
 - **O oráculo de temporização, medido e não só testado.** Antes de mesclar o #40 subi o servidor e cronometrei: conta existente com senha errada e conta inexistente respondem em **94 ms as duas**, média de cinco. Era a afirmação central de segurança do PR e ela se sustenta fora do teste unitário. O limite dispara na 9ª falha, como documentado — e vale registrar o custo real: **durante o bloqueio de 15 minutos até a senha certa recebe 429.** É o comportamento pretendido, mas é o cenário "tranca gente de verdade", e quem operar o piloto precisa saber disso antes de o primeiro aluno ligar reclamando.
+
+- **O painel de XP nunca apareceu para ninguém.** O `StudentDashboard` sempre chamou `/api/progress/gamification`, e nada nunca respondeu — a implementação vivia só no backend Express que jamais foi implantado e que o #41 apagou. O dashboard não confere a resposta, então o painel inteiro de XP, nível e sequência estava **ausente em silêncio** para todo aluno do app implantado. Fechado no [PR #49](https://github.com/LuizArgenta/open-alpha/pull/49). A versão apagada lia `users.xp_points`, coluna que este schema não tem e que nada escreve: portar verbatim teria produzido um painel que lê zero para sempre, o que é pior que painel nenhum, porque parece resposta. O XP agora é somado de `xp_awards`, onde ele de fato vive e onde cada concessão nomeia a tentativa que a rendeu.
+
+- **Teste unitário não teria pego o streak.** Escolhi contar dias a partir de `learning_events` e os testes passaram, porque os testes inseriam eventos direto. Rodando uma prova de verdade contra o servidor, um aluno que acabara de fazer prova tinha sequência **zero**: `learning_events` só é escrito por `progress/events.ts`, que o navegador chama — prova não escreve nada lá. A sequência agora conta eventos **e** tentativas, que o servidor grava sozinho e que sobrevivem a um navegador que não reportou.
+
+- **Vulnerabilidades de dependência, medidas em três etapas.** Antes do #41 eram **44** em produção, com 26 altas e 2 críticas. Apagar o `backend/` obsoleto levou a **5** — toda a cadeia Expo/metro vivia sob `backend/node_modules`. O `npm audit fix` sem `--force` levou a **2** (`form-data` CRLF, `ws` divulgação de memória e DoS, `@remix-run/router`). As **2 que sobram são do `react-router`** e só saem com major: isso é atualização de código, não tarefa de manutenção, e fica como PR próprio deliberado em vez de entrar de carona num `--force`.
 
 - **Confiança do domínio ainda é 1.0 para prova e 0.6 para nivelamento, fixos.** É o item 23, e continua certo adiar até haver aluno real — mas o campo já existe e já é lido, então o dia em que houver dado ele está pronto.
 

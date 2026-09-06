@@ -117,6 +117,7 @@ export const en: Dictionary = {
   // ── Attempt diagnosis (Phase 3) ───────────────────────────────────────────
   'diagnosis.rapidGuessing': "You answered {rapid} of {total} questions in under {seconds} seconds. Slow down and read each one — this score doesn't tell us what you actually know yet.",
   'diagnosis.distraction': 'Looks like you stepped away in the middle of this quiz. Try it again in one sitting so the result reflects what you know.',
+  'diagnosis.recurringMisconception': "You made the same kind of mistake {count} times. That's useful — it means there's one idea to sort out, not a lot of separate ones.",
 
   // ── Focus meter (Phase 4) ─────────────────────────────────────────────────
   'focus.title': 'Focus meter',

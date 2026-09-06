@@ -86,15 +86,10 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
       if (data.questions && data.questions.length > 0) {
         setQuestions(data.questions);
         setAttemptId(data.attemptId ?? null);
-        // Track quiz start
-        fetch('/api/progress/events', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ subject, conceptId, eventType: 'quiz_start' }),
-        }).catch(() => {/* non-critical */});
+        // The server records quiz_start itself, from the request that opened
+        // the attempt. Reporting it from here as well produced two rows for
+        // one event — and the browser's copy was the unreliable one, sent
+        // fire-and-forget with its failures swallowed.
       } else {
         throw new Error('No questions received');
       }

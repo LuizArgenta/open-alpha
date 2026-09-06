@@ -2,6 +2,11 @@
 
 **Escopo:** só software/pedagogia. Nada de modelo de negócio, preço, expansão ou operação física — isso fica fora deste documento de propósito.
 
+
+> **Nota de 6 de setembro de 2026.** Este documento permanece **como está**: é a constituição do motor pedagógico. Quatro decisões suas seguem sendo a base e não são revisadas pelo [PRD v3](./PRD-v3-motor-de-intervencao.md) — motor determinístico antes do LLM, retenção como parte do domínio, diagnóstico do tipo de erro, e intervenção humana orientada por sinal em vez de métrica crua.
+>
+> O v3 amplia o enquadramento em volta dele; não substitui nada daqui.
+
 **Objetivo:** o Open Alpha já tem um grafo de currículo com pré-requisitos e um limiar de mastery (80%). O que falta é o que o relatório sobre a Alpha chama de "motor de decisão": um sistema que usa o histórico real do aluno (não só "passou/não passou") para decidir o próximo passo, cobrar retenção ao longo do tempo, e dar ao humano que acompanha (professor/pai) sinal acionável em vez de métricas cruas.
 
 ---

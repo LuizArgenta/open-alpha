@@ -17,9 +17,12 @@
 import { executeSql, withTransaction } from '../../_lib/db.js';
 import { getAuthFromRequest, forbidden, unauthorized } from '../../_lib/auth.js';
 import { ATTEMPT_DEADLINE_MODIFIER, attemptExpired, expireAttempt } from '../../_lib/attempts.js';
+import { recordEvent } from '../../_lib/events.js';
 
 interface AttemptRow {
   student_id: number;
+  subject: string;
+  concept_id: string;
   finished_at: string | null;
   expired_at: string | null;
   stale: number;
@@ -53,7 +56,7 @@ export async function POST(request: Request) {
     }
 
     const attempt = await executeSql<AttemptRow>(
-      `SELECT student_id, finished_at, expired_at,
+      `SELECT student_id, subject, concept_id, finished_at, expired_at,
               started_at < datetime('now', $1) as stale
        FROM assessment_attempts WHERE id = $2`,
       [ATTEMPT_DEADLINE_MODIFIER, attemptId]
@@ -160,6 +163,17 @@ export async function POST(request: Request) {
 
       return Response.json({ error: 'Attempt already finished' }, { status: 409 });
     }
+
+    // The server graded it, so the server records it. The browser's own
+    // report of the same fact was fire-and-forget and often never arrived.
+    await recordEvent({
+      studentId: auth.userId,
+      subject: attempt.rows[0].subject,
+      conceptId: attempt.rows[0].concept_id,
+      type: 'quiz_answer',
+      attemptId: attemptId as number,
+      payload: { itemId, correct, responseTimeMs: responseTimeMs ?? null },
+    });
 
     return Response.json({
       correct,

@@ -76,6 +76,27 @@ function masteryCheckProblem(value: unknown): string | undefined {
       if (ids.has(question.id)) return `${where}.id "${question.id}" is duplicated`;
       ids.add(question.id);
     }
+
+    const problem = questionProblem(question, where);
+    if (problem) return problem;
+  }
+
+  return undefined;
+}
+
+/**
+ * Checks one question the engine would serve, wherever it came from.
+ *
+ * Split out of the mastery-check walk above because generated questions need
+ * exactly the same guarantees and were getting none: `tutor/quiz.ts` took the
+ * model's JSON straight from `JSON.parse` into `openAttempt`. The unanswerable
+ * item this file was written to catch — a `correctAnswer` matching no option,
+ * which every student fails forever while the engine reads it as a knowledge
+ * gap — was therefore only caught on the authored path, which is 6% of the
+ * curriculum. The other 94% went unchecked.
+ */
+export function questionProblem(question: Record<string, unknown>, where: string): string | undefined {
+  {
     if (!isNonEmptyString(question.question)) return `${where}.question is missing`;
 
     const options = question.options;
@@ -107,6 +128,14 @@ function masteryCheckProblem(value: unknown): string | undefined {
         const rationaleIndex = identifiedOptionIndex(answer, options);
         if (rationaleIndex < 0) return `${where}.${field}.${answer} matches no option`;
         if (rationaleIndex === correctIndex) return `${where}.${field} names the correct answer`;
+      }
+
+      // Partial coverage is worse than none: a diagnosis that reads error
+      // codes would silently treat "no code recorded" as "no shared cause",
+      // so three mistakes from one misunderstanding could look like three
+      // unrelated ones. Absent is honest; half-filled lies.
+      if (Object.keys(question[field] as object).length !== options.length - 1) {
+        return `${where}.${field} covers ${Object.keys(question[field] as object).length} of ${options.length - 1} distractors`;
       }
     }
   }

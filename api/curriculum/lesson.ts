@@ -14,6 +14,7 @@
  */
 
 import { executeSql } from '../_lib/db.js';
+import { modelFor } from '../_lib/model-policy.js';
 import { LlmUnavailableError, unavailableResponse } from '../_lib/llm-budget.js';
 import { getSubject, getConcept, type Concept } from '../_lib/curriculum.js';
 import {
@@ -149,11 +150,15 @@ export async function GET(request: Request) {
       return prereq ? prereq.name : pid;
     });
 
-    const model = 'claude-sonnet-4-6';
 
     // Authored content in another language is translated rather than rewritten:
     // the examples and their order were chosen deliberately by a human.
     const translatingAuthoredContent = conceptHasFullContent(concept);
+    // Resolved per capability rather than named here. Which model wrote a
+    // lesson is recorded on the row, so a policy change stays traceable.
+    const model = translatingAuthoredContent
+      ? modelFor('lesson_translation')
+      : modelFor('lesson_generation');
 
     const generationContext = {
       subjectName: subject.name,
