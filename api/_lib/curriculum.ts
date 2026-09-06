@@ -40,6 +40,14 @@ export interface MasteryQuestion {
   options: string[];
   correctAnswer: string;
   explanation: string;
+  /** Item-bank metadata. Optional so existing curriculum remains valid. */
+  difficultyTag?: 'easy' | 'medium' | 'hard';
+  purpose?: 'practice' | 'check' | 'mastery' | 'review';
+  skillTag?: string;
+  reasoningType?: string;
+  distractorRationale?: Record<string, string>;
+  distractorErrorCode?: Record<string, string>;
+  pedagogicalRationale?: string;
 }
 
 export interface MasteryCheck {

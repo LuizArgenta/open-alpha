@@ -103,7 +103,6 @@
                 "questions": {
                   "type": "array",
                   "minItems": 5,
-                  "maxItems": 5,
                   "items": {
                     "type": "object",
                     "required": ["id", "question", "options", "correctAnswer", "explanation"],
@@ -112,7 +111,14 @@
                       "question": { "type": "string" },
                       "options": { "type": "array", "minItems": 3, "maxItems": 4, "items": { "type": "string" } },
                       "correctAnswer": { "type": "string", "enum": ["A", "B", "C", "D"] },
-                      "explanation": { "type": "string" }
+                      "explanation": { "type": "string" },
+                      "difficultyTag": { "type": "string", "enum": ["easy", "medium", "hard"] },
+                      "purpose": { "type": "string", "enum": ["practice", "check", "mastery", "review"] },
+                      "skillTag": { "type": "string" },
+                      "reasoningType": { "type": "string" },
+                      "distractorRationale": { "type": "object", "additionalProperties": { "type": "string" } },
+                      "distractorErrorCode": { "type": "object", "additionalProperties": { "type": "string" } },
+                      "pedagogicalRationale": { "type": "string" }
                     }
                   }
                 }
@@ -195,6 +201,11 @@
             "distractorRationale": {
               "type": "object",
               "description": "Why each wrong answer is tempting — helps humans review quality and train remediation logic.",
+              "additionalProperties": { "type": "string" }
+            },
+            "distractorErrorCode": {
+              "type": "object",
+              "description": "Stable misconception/error code for each wrong option.",
               "additionalProperties": { "type": "string" }
             },
             "difficultyTag": { "type": "string", "enum": ["easy", "medium", "hard"] },

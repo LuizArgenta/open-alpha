@@ -51,6 +51,13 @@ interface LessonBody {
         options: string[];
         correctAnswer: string;
         explanation: string;
+        difficultyTag?: 'easy' | 'medium' | 'hard';
+        purpose?: 'practice' | 'check' | 'mastery' | 'review';
+        skillTag?: string;
+        reasoningType?: string;
+        distractorRationale?: Record<string, string>;
+        distractorErrorCode?: Record<string, string>;
+        pedagogicalRationale?: string;
       }>;
     };
     remediationPath?: { action: string; conceptId?: string; message: string };
@@ -131,8 +138,8 @@ function validateLessonContent(body: LessonBody): ValidationResult {
   // Validate mastery check
   if (content.masteryCheck) {
     const q = content.masteryCheck.questions;
-    if (!q || q.length !== 5) {
-      errors.push('masteryCheck.questions must have exactly 5 questions');
+    if (!q || q.filter(item => (item.purpose ?? 'mastery') === 'mastery').length < 5) {
+      errors.push('masteryCheck.questions must have at least 5 mastery items');
     } else {
       for (let i = 0; i < q.length; i++) {
         if (!q[i].question) errors.push(`masteryCheck.questions[${i}].question is required`);

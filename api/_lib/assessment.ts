@@ -10,13 +10,37 @@
  * still open next door.
  */
 
-import { executeSql } from './db.js';
+import { executeSql, executeTransaction } from './db.js';
+import { selectMasteryItems, snapshotItem } from './item-bank.js';
+
+const poolSyncs = new Map<string, Promise<void>>();
+
+async function withPoolLock<T>(key: string, action: () => Promise<T>): Promise<T> {
+  const previous = poolSyncs.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>(resolve => { release = resolve; });
+  poolSyncs.set(key, current);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (poolSyncs.get(key) === current) poolSyncs.delete(key);
+  }
+}
 
 export interface AttemptQuestion {
   question: string;
   options: string[];
   correctAnswer: string;
   explanation?: string;
+  difficultyTag?: 'easy' | 'medium' | 'hard';
+  purpose?: 'practice' | 'check' | 'mastery' | 'review';
+  skillTag?: string;
+  reasoningType?: string;
+  distractorRationale?: Record<string, string>;
+  distractorErrorCode?: Record<string, string>;
+  pedagogicalRationale?: string;
 }
 
 export interface AttemptItem {
@@ -25,6 +49,8 @@ export interface AttemptItem {
   question: AttemptQuestion;
   /** The curriculum's own id for an authored item, when it has one. */
   authoredId?: string;
+  /** Already persisted by the item-bank sync. */
+  storedItemId?: number;
 }
 
 export interface OpenedAttempt {
@@ -45,33 +71,118 @@ async function storeItem(
   source: 'authored' | 'generated',
   item: AttemptItem
 ): Promise<number> {
-  if (source === 'authored' && item.authoredId) {
+  if (item.storedItemId !== undefined) return item.storedItemId;
+
+  const snapshot = snapshotItem(item.question);
+  const identityParams = [subject, item.conceptId, language, item.authoredId ?? null];
+
+  const findSnapshot = async (): Promise<number | undefined> => {
+    if (source !== 'authored' || !item.authoredId) return undefined;
     const existing = await executeSql<{ id: number }>(
       `SELECT id FROM assessment_items
-       WHERE subject_id = $1 AND concept_id = $2 AND language = $3 AND authored_id = $4`,
-      [subject, item.conceptId, language, item.authoredId]
+       WHERE subject_id = $1 AND concept_id = $2 AND language = $3
+         AND authored_id = $4 AND content_hash = $5`,
+      [...identityParams, snapshot.contentHash]
     );
-    if (existing.rows.length > 0) return existing.rows[0].id;
+    return existing.rows[0]?.id;
+  };
+
+  const activateSnapshot = async (itemId: number): Promise<void> => {
+    if (source !== 'authored' || !item.authoredId) return;
+    // The order matters with the partial unique index: retire the former
+    // active version before activating this exact immutable snapshot.
+    await executeTransaction([
+      {
+        sql: `UPDATE assessment_items SET status = 'retired'
+              WHERE subject_id = $1 AND concept_id = $2 AND language = $3
+                AND authored_id = $4 AND id <> $5`,
+        params: [...identityParams, itemId],
+      },
+      { sql: `UPDATE assessment_items SET status = 'active' WHERE id = $1`, params: [itemId] },
+    ]);
+  };
+
+  const reusable = await findSnapshot();
+  if (reusable !== undefined) {
+    await activateSnapshot(reusable);
+    return reusable;
   }
 
-  const inserted = await executeSql<{ id: number }>(
-    `INSERT INTO assessment_items
-       (subject_id, concept_id, language, source, authored_id, stem, options, correct_answer, explanation)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     RETURNING id`,
-    [
-      subject,
-      item.conceptId,
-      language,
-      source,
-      item.authoredId ?? null,
-      item.question.question,
-      JSON.stringify(item.question.options),
-      item.question.correctAnswer,
-      item.question.explanation ?? null,
-    ]
-  );
-  return inserted.rows[0].id;
+  // UNIQUE indexes arbitrate concurrent writers. A collision means another
+  // request won either the same hash or the next version; re-read and retry.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const priorVersion = item.authoredId
+      ? await executeSql<{ version: number }>(
+        `SELECT COALESCE(MAX(version), 0) AS version FROM assessment_items
+         WHERE subject_id = $1 AND concept_id = $2 AND language = $3 AND authored_id = $4`,
+        identityParams
+      )
+      : { rows: [{ version: 0 }], rowCount: 1 };
+    const version = Number(priorVersion.rows[0]?.version ?? 0) + 1;
+
+    const inserted = await executeSql<{ id: number }>(
+      `INSERT INTO assessment_items
+         (subject_id, concept_id, language, source, authored_id, stem, options,
+          correct_answer, explanation, difficulty_tag, purpose, skill_tag,
+          reasoning_type, distractor_rationale, distractor_error_code,
+          pedagogical_rationale, content_hash, version, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+               $13, $14, $15, $16, $17, $18, $19)
+       ON CONFLICT DO NOTHING RETURNING id`,
+      [
+        subject,
+        item.conceptId,
+        language,
+        source,
+        item.authoredId ?? null,
+        item.question.question,
+        JSON.stringify(item.question.options),
+        item.question.correctAnswer,
+        item.question.explanation ?? null,
+        snapshot.difficultyTag,
+        snapshot.purpose,
+        snapshot.skillTag,
+        snapshot.reasoningType,
+        JSON.stringify(snapshot.distractorRationale),
+        JSON.stringify(snapshot.distractorErrorCode),
+        snapshot.pedagogicalRationale,
+        snapshot.contentHash,
+        version,
+        source === 'authored' ? 'retired' : 'active',
+      ]
+    );
+
+    const itemId = inserted.rows[0]?.id ?? await findSnapshot();
+    if (itemId !== undefined) {
+      await activateSnapshot(itemId);
+      return itemId;
+    }
+  }
+
+  throw new Error(`Could not persist a unique snapshot for authored item ${item.authoredId}`);
+}
+
+/** Persist the complete authored pool, then draw five items for this attempt. */
+export async function drawFromAuthoredItemBank(options: {
+  subject: string;
+  conceptId: string;
+  language: string;
+  questions: Array<AttemptQuestion & { id: string }>;
+  random?: () => number;
+}): Promise<AttemptItem[]> {
+  if (options.questions.filter(item => (item.purpose ?? 'mastery') === 'mastery').length < 5) {
+    throw new Error('An authored item bank needs at least five mastery items');
+  }
+  const key = [options.subject, options.conceptId, options.language].join('\u0000');
+  return withPoolLock(key, async () => {
+    const pool: AttemptItem[] = [];
+    for (const { id, ...question } of options.questions) {
+      const item: AttemptItem = { conceptId: options.conceptId, authoredId: id, question };
+      item.storedItemId = await storeItem(options.subject, options.language, 'authored', item);
+      pool.push(item);
+    }
+    return selectMasteryItems(pool, options.random);
+  });
 }
 
 /**

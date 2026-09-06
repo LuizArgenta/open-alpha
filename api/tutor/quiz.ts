@@ -2,7 +2,7 @@ import { executeSql } from '../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage, generateQuizQuestions } from '../_lib/llm.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
-import { type AttemptQuestion, openAttempt, withoutAnswerKey } from '../_lib/assessment.js';
+import { drawFromAuthoredItemBank, type AttemptQuestion, openAttempt, withoutAnswerKey } from '../_lib/assessment.js';
 import { expireStaleAttempts } from '../_lib/attempts.js';
 
 interface User {
@@ -40,10 +40,18 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Concept not found' }, { status: 400 });
     }
 
-    // If the concept has stored mastery check questions, use them directly.
-    // This avoids LLM generation costs and ensures curriculum alignment.
-    if (concept.masteryCheck?.questions?.length === 5) {
-      const authored = concept.masteryCheck.questions;
+    // Authored mastery checks are item pools: persist every item, then draw the
+    // five that form this attempt. More adaptive selection belongs to item 20.
+    const authored = concept.masteryCheck?.questions;
+    const masteryItemCount = authored?.filter(item => (item.purpose ?? 'mastery') === 'mastery').length ?? 0;
+    const hasStableIds = authored?.every(item => typeof item.id === 'string' && item.id.trim().length > 0) ?? false;
+    if (masteryItemCount >= 5 && hasStableIds) {
+      const selected = await drawFromAuthoredItemBank({
+        subject,
+        conceptId,
+        language,
+        questions: authored!,
+      });
       const { attemptId, items } = await openAttempt({
         studentId: auth.userId,
         subject,
@@ -51,7 +59,7 @@ export async function POST(request: Request) {
         language,
         kind: 'mastery',
         source: 'authored',
-        items: authored.map(({ id, ...question }) => ({ conceptId, question, authoredId: id })),
+        items: selected,
       });
       return Response.json({ attemptId, questions: items.map(withoutAnswerKey) });
     }
