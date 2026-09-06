@@ -1,4 +1,5 @@
 import { executeSql } from '../_lib/db.js';
+import { LlmUnavailableError, unavailableResponse } from '../_lib/llm-budget.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { DEFAULT_CONTENT_LANGUAGE, type ContentLanguage, generateQuizQuestions } from '../_lib/llm.js';
 import { getConceptWithLesson } from '../_lib/curriculum.js';
@@ -116,6 +117,9 @@ export async function POST(request: Request) {
 
     return Response.json({ attemptId, questions: items.map(withoutAnswerKey) });
   } catch (error) {
+    // A refused model call is not a server fault: say which limit was hit
+    // so the interface can tell a budget from an outage.
+    if (error instanceof LlmUnavailableError) return unavailableResponse(error);
     console.error('Quiz generation error:', error);
     return Response.json({ error: 'Failed to generate quiz' }, { status: 500 });
   }

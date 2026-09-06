@@ -1,4 +1,5 @@
 import { executeSql } from '../_lib/db.js';
+import { LlmUnavailableError, unavailableResponse } from '../_lib/llm-budget.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { chatWithCoach, ChatMessage, CoachContext, DEFAULT_CONTENT_LANGUAGE, type ContentLanguage } from '../_lib/llm.js';
 import { subjects } from '../_lib/curriculum.js';
@@ -101,6 +102,9 @@ export async function POST(request: Request) {
 
     return Response.json({ sessionId: session.id, response: aiResponse, messages });
   } catch (error) {
+    // A refused model call is not a server fault: say which limit was hit
+    // so the interface can tell a budget from an outage.
+    if (error instanceof LlmUnavailableError) return unavailableResponse(error);
     console.error('Coach chat error:', error);
     return Response.json({ error: 'Failed to chat with coach' }, { status: 500 });
   }
