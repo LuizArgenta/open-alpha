@@ -22,6 +22,9 @@ process.env.TZ = 'America/Recife';
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
+    // Deletes the shared scratch database before the run, so a table left by
+    // a different branch cannot be mistaken for part of this one's schema.
+    globalSetup: ['tests/helpers/global-setup.ts'],
     // The database-backed tests share one scratch file; running test files
     // serially keeps them from clearing tables under each other.
     fileParallelism: false,
