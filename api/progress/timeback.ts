@@ -1,4 +1,5 @@
 import { executeSql } from '../_lib/db.js';
+import { parseDbTimestamp } from '../_lib/time.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { getConcept } from '../_lib/curriculum.js';
 import { WALKED_AWAY_MS, rapidAnswerThresholdMs } from '../_lib/diagnosis.js';
@@ -81,7 +82,7 @@ export async function GET(request: Request) {
           break;
         case 'lesson_end':
           if (lessonStartTime) {
-            totalLessonTimeMs += new Date(event.created_at).getTime() - new Date(lessonStartTime).getTime();
+            totalLessonTimeMs += parseDbTimestamp(event.created_at).getTime() - parseDbTimestamp(lessonStartTime).getTime();
             lessonStartTime = null;
           }
           break;
@@ -107,7 +108,7 @@ export async function GET(request: Request) {
           // answers is what actually shows a student leaving mid-quiz.
           if (
             previousAnswerAt &&
-            new Date(event.created_at).getTime() - new Date(previousAnswerAt).getTime() >= WALKED_AWAY_MS
+            parseDbTimestamp(event.created_at).getTime() - parseDbTimestamp(previousAnswerAt).getTime() >= WALKED_AWAY_MS
           ) {
             walkedAwayCount++;
           }
@@ -116,7 +117,7 @@ export async function GET(request: Request) {
         }
         case 'quiz_complete':
           if (quizStartTime) {
-            totalQuizTimeMs += new Date(event.created_at).getTime() - new Date(quizStartTime).getTime();
+            totalQuizTimeMs += parseDbTimestamp(event.created_at).getTime() - parseDbTimestamp(quizStartTime).getTime();
             quizStartTime = null;
           }
           break;

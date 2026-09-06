@@ -1,4 +1,5 @@
 import { executeSql } from '../_lib/db.js';
+import { parseDbTimestamp } from '../_lib/time.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { getConcept } from '../_lib/curriculum.js';
 
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
       nextReviewAt: row.next_review_at,
       intervalDays: row.review_interval_days,
       daysSince: Math.floor(
-        (Date.now() - new Date(row.last_attempt_at).getTime()) / (1000 * 60 * 60 * 24)
+        (Date.now() - parseDbTimestamp(row.last_attempt_at).getTime()) / (1000 * 60 * 60 * 24)
       ),
     }));
 

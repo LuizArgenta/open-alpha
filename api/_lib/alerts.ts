@@ -1,3 +1,4 @@
+import { parseDbTimestamp } from './time.js';
 /**
  * Turns a student's progress rows into things an adult can act on.
  *
@@ -43,7 +44,7 @@ export interface StudentAlert {
 const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
 
 function daysBetween(from: string, now: Date): number {
-  return Math.floor((now.getTime() - new Date(from).getTime()) / MS_PER_DAY);
+  return Math.floor((now.getTime() - parseDbTimestamp(from).getTime()) / MS_PER_DAY);
 }
 
 export function buildAlerts(
@@ -95,12 +96,12 @@ export function buildAlerts(
   }
 
   const overdue = rows.filter(
-    row => row.nextReviewAt !== null && new Date(row.nextReviewAt).getTime() <= now.getTime()
+    row => row.nextReviewAt !== null && parseDbTimestamp(row.nextReviewAt).getTime() <= now.getTime()
   );
 
   if (overdue.length > 0) {
     const oldest = overdue.reduce((worst, row) =>
-      new Date(row.nextReviewAt!).getTime() < new Date(worst.nextReviewAt!).getTime() ? row : worst
+      parseDbTimestamp(row.nextReviewAt!).getTime() < parseDbTimestamp(worst.nextReviewAt!).getTime() ? row : worst
     );
     const oldestDays = daysBetween(oldest.nextReviewAt!, now);
 
