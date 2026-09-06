@@ -199,6 +199,28 @@ async function migrateAssessmentItemBank(): Promise<void> {
 }
 
 /**
+ * Ties an XP award to the attempt that earned it.
+ *
+ * Without the column, "one award per attempt" is only as strong as the code
+ * path that writes it, and XP is the one number a student watches — a double
+ * award is both wrong and visibly wrong. The unique index is partial because
+ * awards predating the column carry no attempt id, and because SQLite's UNIQUE
+ * would otherwise treat every one of those nulls as distinct anyway.
+ */
+async function migrateXpAwardsAttemptId(): Promise<void> {
+  const columns = await client.execute('PRAGMA table_info(xp_awards)');
+  const hasAttemptId = columns.rows.some(row => String(row.name) === 'attempt_id');
+  if (!hasAttemptId) {
+    await client.execute(
+      'ALTER TABLE xp_awards ADD COLUMN attempt_id INTEGER REFERENCES assessment_attempts(id)'
+    );
+  }
+
+  await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS xp_awards_one_per_attempt
+    ON xp_awards(attempt_id) WHERE attempt_id IS NOT NULL`);
+}
+
+/**
  * assessment_responses' UNIQUE(attempt_id, item_id) only exists in the
  * fresh-install CREATE TABLE above. An install whose table predates that
  * constraint (anything before PR #20) has it recreated by the legacy
@@ -251,6 +273,33 @@ function toLibsqlStatement({ sql, params }: SqlStatement) {
 }
 
 /**
+ * One write transaction at a time, per process.
+ *
+ * `client.transaction('write')` issues a BEGIN, and against a local SQLite
+ * file a second BEGIN while one is open fails outright with SQLITE_BUSY —
+ * thrown while acquiring, before any statement runs. Two learners submitting
+ * at the same moment would then get a 500 rather than the answer their
+ * request deserves, and that is the deployment this project promises to
+ * support offline.
+ *
+ * Serialising here costs nothing against a remote Turso, where each instance
+ * holds its own connection and the server arbitrates anyway, and makes the
+ * local case deterministic instead of a race. Reads are untouched: only the
+ * transaction bodies queue, so the interleaving that concurrency guards exist
+ * to catch still happens.
+ *
+ * Nesting is not supported — a transaction body that calls back into one of
+ * these would wait on itself. Use the scope handed to the callback.
+ */
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+function enqueueWrite<T>(work: () => Promise<T>): Promise<T> {
+  const result = writeQueue.then(work, work);
+  writeQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+/**
  * Runs statements as one unit, so a failure halfway cannot leave a student
  * with XP awarded and no progress recorded, or an attempt closed with no
  * mastery written.
@@ -263,16 +312,18 @@ function toLibsqlStatement({ sql, params }: SqlStatement) {
 export async function executeTransaction(statements: SqlStatement[]): Promise<void> {
   if (statements.length === 0) return;
 
-  const transaction = await client.transaction('write');
-  try {
-    for (const statement of statements) {
-      await transaction.execute(toLibsqlStatement(statement));
+  return enqueueWrite(async () => {
+    const transaction = await client.transaction('write');
+    try {
+      for (const statement of statements) {
+        await transaction.execute(toLibsqlStatement(statement));
+      }
+      await transaction.commit();
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
     }
-    await transaction.commit();
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
-  }
+  });
 }
 
 /** Reads and writes issued inside a `withTransaction` callback. */
@@ -303,20 +354,22 @@ export interface TransactionScope {
 export async function withTransaction<T>(
   work: (scope: TransactionScope) => Promise<T>
 ): Promise<T> {
-  const transaction = await client.transaction('write');
-  try {
-    const result = await work({
-      run: async (sql, params) => {
-        const executed = await transaction.execute(toLibsqlStatement({ sql, params }));
-        return { rows: executed.rows as any[], rowCount: executed.rowsAffected };
-      },
-    });
-    await transaction.commit();
-    return result;
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
-  }
+  return enqueueWrite(async () => {
+    const transaction = await client.transaction('write');
+    try {
+      const result = await work({
+        run: async (sql, params) => {
+          const executed = await transaction.execute(toLibsqlStatement({ sql, params }));
+          return { rows: executed.rows as any[], rowCount: executed.rowsAffected };
+        },
+      });
+      await transaction.commit();
+      return result;
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  });
 }
 
 export async function initializeSchema(): Promise<void> {
@@ -585,6 +638,9 @@ export async function initializeSchema(): Promise<void> {
       student_id INTEGER REFERENCES users(id),
       subject TEXT NOT NULL,
       concept_id TEXT NOT NULL,
+      -- The attempt that earned it, so an award can be traced back to the
+      -- evidence for it and cannot be granted twice for the same attempt.
+      attempt_id INTEGER REFERENCES assessment_attempts(id),
       amount INTEGER NOT NULL,
       reason TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
@@ -812,6 +868,7 @@ export async function initializeSchema(): Promise<void> {
   // relying on the swallowed errors above.
   await migrateGeneratedLessonsToPerLanguage();
   await ensureAssessmentResponsesUniqueConstraint();
+  await migrateXpAwardsAttemptId();
 }
 
 export default { executeSql, initializeSchema };

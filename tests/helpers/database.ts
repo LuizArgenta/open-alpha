@@ -12,10 +12,12 @@ import { executeSql, initializeSchema } from '../../api/_lib/db.js';
 const TABLES_IN_DEPENDENCY_ORDER = [
   'assessment_responses',
   'assessment_attempt_items',
+  // Before assessment_attempts: an XP award now names the attempt that earned
+  // it, so clearing attempts first trips the foreign key.
+  'xp_awards',
   'assessment_attempts',
   'assessment_items',
   'learning_decisions',
-  'xp_awards',
   'learning_events',
   'focus_contests',
   'progress',
