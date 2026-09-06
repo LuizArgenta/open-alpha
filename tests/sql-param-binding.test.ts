@@ -9,7 +9,7 @@
  * number, not position.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { executeSql, executeTransaction } from '../api/_lib/db.js';
 
 async function resetProbeTable(): Promise<void> {
@@ -19,6 +19,16 @@ async function resetProbeTable(): Promise<void> {
 
 beforeEach(async () => {
   await resetProbeTable();
+});
+
+/**
+ * Every test file shares one scratch database, so a table left behind here is
+ * a table the rest of the suite has to know about. `tests/data-notice.test.ts`
+ * reads the schema to check the data notice against it, and found this one
+ * sitting there pretending to be part of the product.
+ */
+afterAll(async () => {
+  await executeSql('DROP TABLE IF EXISTS sql_binding_probe');
 });
 
 describe('SQL parameter binding', () => {
