@@ -22,7 +22,7 @@ Da segunda auditoria, já mergeados: [#28](https://github.com/LuizArgenta/open-a
 
 [#32](https://github.com/LuizArgenta/open-alpha/pull/32) trouxe o banco de itens (item 19) e o núcleo do item 10; auditado no próprio PR antes de mesclar, com o conflito em `db.ts` resolvido preservando as três migrações. [#34](https://github.com/LuizArgenta/open-alpha/pull/34) fechou o item 11 e a API de transação com callback que os itens 9 e 11 precisavam, [#35](https://github.com/LuizArgenta/open-alpha/pull/35) fechou o item 9 — de quebra, tapando uma exposição a `SQLITE_BUSY` que existia desde o PR #22 — [#36](https://github.com/LuizArgenta/open-alpha/pull/36) fechou o item 10 e [#37](https://github.com/LuizArgenta/open-alpha/pull/37) fechou o item 12 — **com isso a metade de integridade do Marco 1 (itens 1 a 12) está inteira** — [#38](https://github.com/LuizArgenta/open-alpha/pull/38) endureceu a cadeia de build (item 18, metade que sai por PR) e [#39](https://github.com/LuizArgenta/open-alpha/pull/39) fechou a varredura de IDOR (item 16).
 
-**392 testes** em `main`, contra 160 quando este plano foi escrito.
+**393 testes** em `main`, contra 160 quando este plano foi escrito.
 
 **Cobertura de conteúdo autorado, medida e não estimada:** dos **141 conceitos**, apenas **9** têm `masteryCheck`. Todos os 9 têm `id` estável e ≥5 itens, então o banco de itens do #32 não regride nada — mas quer dizer que os itens 19 a 21 valem hoje para **6% do currículo**. Os outros 94% caem na geração por LLM. Nenhum algoritmo de seleção conserta isso; é trabalho de autoria, e está registrado em "Fora de PR".
 
