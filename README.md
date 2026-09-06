@@ -32,9 +32,12 @@ a human being's attention.
 least intervention necessary and hand the student back to whatever they were
 doing.
 
-**What this implies:** a school does not have to replace what it already uses.
-Open Alpha is designed to work over someone else's textbook, someone else's
-lessons, someone else's tests — as the adaptive layer, not the destination.
+**The content is not ours, in two senses.** It is not proprietary: the
+curriculum graph is open and collaborative, it grows over time, and it is meant
+to be populated by teachers — and eventually by AI at scale. And it does not
+have to be ours at all: the engine is designed to work just as well over
+someone else's textbook, lessons and tests. A school does not have to replace
+what it already uses.
 
 Read the architecture this is heading towards in
 [docs/PRD-v3-motor-de-intervencao.md](./docs/PRD-v3-motor-de-intervencao.md)
@@ -59,8 +62,12 @@ calls, and rate-limited authentication.
 **Does not work yet, and is on the roadmap:**
 
 - **Content coverage is 6%.** Of 141 concepts, 9 have authored mastery checks.
-  The other 94% generate their questions from a language model on demand. No
-  selection algorithm fixes that; it is authoring work.
+  The other 94% generate their questions from a language model on demand.
+- **The contribution pipeline does not reach students.** Teachers can submit
+  lessons and questions, reviewers can approve them — and an approved
+  contribution sits at `approved` forever. Nothing publishes it. Closing that
+  last step is what turns the collaborative graph from an intention into a
+  fact.
 - **The pedagogical metadata is recorded but unused.** Each item stores the
   misconception behind each wrong option — and no query reads it yet. Three
   mistakes from one misunderstanding and three unrelated mistakes currently

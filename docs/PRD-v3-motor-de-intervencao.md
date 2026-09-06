@@ -10,7 +10,15 @@
 
 Não precisa ser uma LXP. Pode oferecer lições, mas isso é *uma forma* de intervenção, não o produto.
 
-A consequência comercial: **a escola não precisa trocar o que já usa.** O motor pode operar sobre o livro dela, o LMS dela, as provas dela.
+### O conteúdo não é nosso — em dois sentidos
+
+**Não é proprietário.** O grafo curricular é aberto e colaborativo, e cresce ao longo do tempo: mais matérias, mais domínios, povoados por professores e — mais adiante — por IA em escala. É a tese da "Wikipédia do aprendizado" do `ROADMAP.md`, e ela **não conflita** com este documento: um grafo aberto é o oposto de um repositório proprietário.
+
+**E não precisa ser só nosso.** O motor tem que funcionar igualmente bem sobre o livro da escola, o LMS dela ou as provas dela. Por isso `Intervention.source` admite `open_alpha`, `teacher`, `school`, `external` e `generated` como iguais — nenhum deles é o caminho privilegiado.
+
+A consequência comercial: **a escola não precisa trocar o que já usa.**
+
+**Prioridade declarada:** povoar o grafo em massa não é o foco agora. O que é foco agora é não fechar a porta — e a porta está fechada hoje, pela seção 5.4.
 
 ## 2. O laço
 
@@ -39,11 +47,13 @@ O Open Alpha **não** será:
 
 > Se amanhã uma escola disser *"não quero seu conteúdo, quero meu livro, meu LMS e meu endpoint de IA"*, o Open Alpha ainda consegue diagnosticar, decidir, recomendar uma intervenção e medir o resultado?
 
-**Hoje: não.** Três razões, todas mensuradas na seção 5.
+**Hoje: não.** Quatro razões, todas mensuradas na seção 5.
 
-## 5. Três pré-condições que a arquitetura-alvo assume e que não existem
+## 5. Quatro pré-condições que a arquitetura-alvo assume e que não existem
 
 Esta é a parte que separa este documento do memorando que o originou. As abstrações propostas são boas; elas se apoiam em coisas que não estão lá.
+
+**As quatro têm a mesma forma**, e vale nomear o padrão porque ele já apareceu quatro vezes numa auditoria só: *as duas pontas foram construídas e testadas, e o meio não existe.* Cada metade funciona; a ligação entre elas não; e nada percebe, porque nenhum teste percorre o caminho inteiro. O quinto caso foi encontrado e corrigido esta semana — o dashboard chamava `/api/progress/gamification` e nada respondia.
 
 ### 5.1 Os metadados pedagógicos não chegam a nenhuma decisão
 
@@ -72,7 +82,19 @@ Nada do que o servidor sabe entra ali: tentativa aberta, resposta corrigida, dec
 
 Uma tabela `interventions` com `type: worked_example \| micro_lesson \| practice \| retrieval \| diagnostic_probe` descreve escolhas que, para 94% do currículo, não existem — resta pedir geração a um LLM.
 
-É o mesmo erro do item 20: sortear 5 itens de um pool de exatamente 5. **Autoria não é PR, mas é caminho crítico.**
+É o mesmo erro do item 20: sortear 5 itens de um pool de exatamente 5.
+
+A resposta para isso **não é autoria manual de 132 conceitos.** É o pipeline colaborativo — professores agora, IA em escala depois. Que existe. E que está quebrado no último metro, abaixo.
+
+### 5.4 A contribuição aprovada nunca chega ao aluno
+
+O pipeline colaborativo existe e é real: `api/contribute/lesson.ts`, `api/contribute/quiz.ts`, revisão por pares em `api/quality/review.ts`, reputação de contribuidor, e um estado `'deployed'` no schema.
+
+**Nada escreve `'deployed'`.** Ele só é lido, como guarda. E nenhum caminho de código pega uma contribuição aprovada e a insere em `curriculum_concepts` ou `assessment_items`.
+
+Um professor contribui uma prova. Dois revisores aprovam. Ela fica em `status='approved'` para sempre.
+
+**Consequência:** a tese do grafo aberto e colaborativo é hoje aspiracional, não porque falte gente disposta, mas porque o último passo não existe. Fechar esse metro é barato — e é o que separa "queremos conteúdo colaborativo" de "temos conteúdo colaborativo".
 
 ## 6. Modelo de domínio
 
@@ -160,6 +182,7 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 | **0.1** | **Metadados pedagógicos no diagnóstico** | `loadAttemptAnswers` carrega `distractor_error_code`, `difficulty_tag` e `skill_tag`; `diagnoseAttempt` distingue *três erros pela mesma causa* de *três erros distintos*. Teste que falha se os dois casos derem o mesmo diagnóstico. |
 | **0.2** | **Servidor como escritor de eventos** | Abrir tentativa, corrigir resposta, finalizar, decidir e conceder XP emitem evento. Teste: fazer uma prova sem o navegador reportar nada produz stream completo. |
 | **0.3** | **Endpoint de modelo configurável** | `LLM_BASE_URL` vem do ambiente, com a ATXP como padrão. Sobe contra endpoint local compatível. |
+| **0.4** | **Contribuição aprovada chega ao aluno** | Uma contribuição `approved` vira conceito ou item publicado e passa a `'deployed'`. Teste: professor contribui → dois revisores aprovam → um aluno senta a prova. Hoje esse teste é impossível de escrever. |
 
 ### Onda 1 — a mudança de contrato
 
@@ -200,7 +223,7 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 
 ### Fora da fila, e caminho crítico
 
-- **Autoria de conteúdo.** 9 de 141 conceitos. Não é PR e bloqueia o valor de tudo acima.
+- **Povoar o grafo em massa.** 9 de 141 conceitos. **Declaradamente não é o foco agora** — mas o item 0.4 é, porque é a diferença entre uma porta fechada e uma porta aberta que ninguém atravessou ainda. Professores primeiro, IA em escala depois.
 - **LGPD operacional** (retenção, exportação, exclusão). O aviso existe; as três entregas não. **Bloqueia uso por menores**, não o piloto com adultos.
 - **Item 13b** (Argon2id), **item 14** (sessões revogáveis). Autenticação, valem por si.
 - `react-router` major.
@@ -210,6 +233,7 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 | | Memorando | Aqui | Por quê |
 |---|---|---|---|
 | Metadados no diagnóstico | ausente | **0.1, primeiro** | Pré-requisito não declarado do diferencial dele |
+| Último metro da contribuição | ausente | **0.4** | Sem ele o grafo colaborativo é aspiracional |
 | Servidor escrevendo eventos | ausente | **0.2, antes do contrato** | Canonizar um stream com buracos os torna permanentes |
 | Abstração de IA | onda 1 completa | 0.3 barato agora, política na onda 4 | Política por escopo não paga sem escolas |
 | Avaliação externa | onda 2, depois de tenancy | **onda 2, antes** | Barata e é o que torna o motor falsificável |
