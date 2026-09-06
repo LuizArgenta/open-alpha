@@ -10,7 +10,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { executeSql, initializeSchema } from '../api/_lib/db.js';
-import { resetDatabase } from './helpers/database.js';
+import { forgetMigration, resetDatabase } from './helpers/database.js';
 
 interface IndexListRow {
   name: string;
@@ -41,7 +41,10 @@ async function createItem(): Promise<number> {
 
 async function recreateTableWithoutUniqueConstraint(): Promise<void> {
   // Exactly the pre-PR-#20 shape: reachable today only via CREATE TABLE IF
-  // NOT EXISTS on an install old enough to already have this table.
+  // NOT EXISTS on an install old enough to already have this table. Such a
+  // database would not carry the migration's record either, so drop that too
+  // — otherwise the migrator correctly skips work it has already done.
+  await forgetMigration('004-assessment-responses-unique');
   await executeSql('DROP TABLE assessment_responses');
   await executeSql(`CREATE TABLE assessment_responses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

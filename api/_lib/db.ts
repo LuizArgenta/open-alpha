@@ -199,6 +199,100 @@ async function migrateAssessmentItemBank(): Promise<void> {
 }
 
 /**
+ * A schema change, applied once and recorded.
+ *
+ * Deliberately not checksummed. The plan asked for one, and for SQL-string
+ * migrations it would be worth having — it catches someone editing a
+ * migration that already ran, which is how a fresh database and an upgraded
+ * one silently diverge. These are functions that call other helpers, so a
+ * checksum of the function body would miss a change one level down while
+ * failing startup over a reworded comment: false confidence and false alarms
+ * at once. The registry below is append-only instead; correcting an applied
+ * migration means adding another one.
+ */
+interface Migration {
+  id: string;
+  run: () => Promise<void>;
+}
+
+/** What the last schema initialisation did, for the health check to report. */
+export const schemaStatus: {
+  ready: boolean;
+  applied: string[];
+  failed: string | null;
+  error: string | null;
+  checkedAt: string | null;
+} = { ready: false, applied: [], failed: null, error: null, checkedAt: null };
+
+/**
+ * The one error an additive statement is allowed to fail with.
+ *
+ * These statements ran for a long time inside a `catch {}` that discarded
+ * every exception as "the column is already there" — including permission,
+ * connection, corruption and constraint errors, which is how a half-migrated
+ * database could report itself healthy. On a database that predates
+ * `_schema_migrations` the columns really are already there, so that one
+ * error still has to be tolerated; nothing else does.
+ */
+function isAlreadyApplied(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /duplicate column name/i.test(message);
+}
+
+async function runAdditiveStatements(statements: string[]): Promise<void> {
+  for (const sql of statements) {
+    try {
+      await client.execute(sql);
+    } catch (error) {
+      if (!isAlreadyApplied(error)) throw error;
+    }
+  }
+}
+
+/**
+ * Runs each migration at most once, in order, and stops at the first failure.
+ *
+ * Stopping matters more than it sounds: the migrations after a failed one
+ * assume it succeeded, so continuing past it produces a database that is
+ * wrong in a second way and harder to diagnose. A failure leaves the id
+ * unrecorded, so the next start retries it rather than skipping ahead.
+ */
+async function applyMigrations(migrations: Migration[]): Promise<void> {
+  schemaStatus.checkedAt = new Date().toISOString();
+
+  await client.execute(`CREATE TABLE IF NOT EXISTS _schema_migrations (
+    id TEXT PRIMARY KEY,
+    applied_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  const recorded = await client.execute('SELECT id FROM _schema_migrations');
+  const alreadyApplied = new Set(recorded.rows.map(row => String(row.id)));
+
+  for (const migration of migrations) {
+    if (alreadyApplied.has(migration.id)) continue;
+
+    try {
+      await migration.run();
+    } catch (error) {
+      schemaStatus.ready = false;
+      schemaStatus.failed = migration.id;
+      schemaStatus.error = error instanceof Error ? error.message : String(error);
+      throw new Error(`Migration ${migration.id} failed: ${schemaStatus.error}`, { cause: error });
+    }
+
+    await client.execute({
+      sql: 'INSERT INTO _schema_migrations (id) VALUES (?)',
+      args: [migration.id],
+    });
+    schemaStatus.applied.push(migration.id);
+  }
+
+  schemaStatus.ready = true;
+  schemaStatus.failed = null;
+  schemaStatus.error = null;
+}
+
+/**
  * Ties an XP award to the attempt that earned it.
  *
  * Without the column, "one award per attempt" is only as strong as the code
@@ -854,21 +948,13 @@ export async function initializeSchema(): Promise<void> {
       created_at TEXT DEFAULT (datetime('now'))
     )`,
   ];
-  for (const sql of migrations) {
-    try {
-      await client.execute(sql);
-    } catch {
-      // Column already exists — safe to ignore
-    }
-  }
-
-  await migrateAssessmentItemBank();
-
-  // Multi-step and not idempotent by accident, so it guards itself rather than
-  // relying on the swallowed errors above.
-  await migrateGeneratedLessonsToPerLanguage();
-  await ensureAssessmentResponsesUniqueConstraint();
-  await migrateXpAwardsAttemptId();
+  await applyMigrations([
+    { id: '001-legacy-columns-and-tables', run: () => runAdditiveStatements(migrations) },
+    { id: '002-assessment-item-bank', run: migrateAssessmentItemBank },
+    { id: '003-generated-lessons-per-language', run: migrateGeneratedLessonsToPerLanguage },
+    { id: '004-assessment-responses-unique', run: ensureAssessmentResponsesUniqueConstraint },
+    { id: '005-xp-awards-attempt-id', run: migrateXpAwardsAttemptId },
+  ]);
 }
 
 export default { executeSql, initializeSchema };

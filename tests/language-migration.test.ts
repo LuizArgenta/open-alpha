@@ -7,6 +7,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { executeSql, initializeSchema } from '../api/_lib/db.js';
+import { forgetMigration } from './helpers/database.js';
 
 const OLD_SHAPE = `
   CREATE TABLE generated_lessons (
@@ -29,7 +30,14 @@ async function columnNames(): Promise<string[]> {
 }
 
 beforeEach(async () => {
+  // Start from a fully migrated database, then rewind it: putting the table
+  // back in its pre-language shape also means dropping the record of the
+  // migration that changed it, since an install still carrying the old shape
+  // would not have that record either.
+  await initializeSchema();
   await executeSql('DROP TABLE IF EXISTS generated_lessons');
+  await forgetMigration('001-legacy-columns-and-tables');
+  await forgetMigration('003-generated-lessons-per-language');
 });
 
 describe('per-language lesson cache migration', () => {
