@@ -12,13 +12,13 @@
  * {
  *   conceptId: string,
  *   subjectId: string,
- *   contributorId: string,
  *   contributorType?: 'agent' | 'human' | 'institution',
  *   questions: QuizQuestion[]
  * }
  */
 
 import { executeSql } from '../_lib/db.js';
+import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { getConcept, getSubject } from '../_lib/curriculum.js';
 
 const CORS_HEADERS = {
@@ -41,7 +41,6 @@ interface QuizQuestion {
 interface QuizBody {
   conceptId: string;
   subjectId: string;
-  contributorId: string;
   contributorType?: 'agent' | 'human' | 'institution';
   questions: QuizQuestion[];
 }
@@ -80,9 +79,21 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as QuizBody;
 
-    if (!body.conceptId || !body.subjectId || !body.contributorId) {
+    /**
+     * The contributor is whoever is signed in, not whoever the request says.
+     * A contribution now publishes to students once two reviewers clear it, so
+     * a caller-chosen name would let one person play both parts.
+     *
+     * Any authenticated user may contribute — a contribution is a proposal.
+     * Reviewing is what turns it into content, and that requires staff.
+     */
+    const auth = getAuthFromRequest(request);
+    if (!auth) return unauthorized();
+    const contributorId = String(auth.userId);
+
+    if (!body.conceptId || !body.subjectId) {
       return Response.json(
-        { error: 'conceptId, subjectId, and contributorId are required' },
+        { error: 'conceptId and subjectId are required' },
         { status: 400, headers: CORS_HEADERS }
       );
     }
@@ -130,7 +141,7 @@ export async function POST(request: Request) {
        VALUES ($1, $2, 'quiz_item', $3, $4, $5, $6, $7)
        RETURNING id`,
       [
-        body.contributorId,
+        contributorId,
         body.contributorType || 'human',
         body.subjectId,
         body.conceptId,
@@ -147,7 +158,7 @@ export async function POST(request: Request) {
          total_contributions = total_contributions + 1,
          last_contribution_at = datetime('now'),
          updated_at = datetime('now')`,
-      [body.contributorId, body.contributorType || 'human']
+      [contributorId, body.contributorType || 'human']
     );
 
     return Response.json(

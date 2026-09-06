@@ -8,15 +8,16 @@
  * Request body: see curriculum/contribution-schema.json (lessonModule type)
  *
  * The contribution system is deliberately low-friction:
- *   - No signup required — just a stable contributorId
+ *   - Requires a signed-in account: the contributor is whoever is
+ *     authenticated, never a name the request chooses
  *   - All content goes into review (never auto-deployed to students)
  *   - Good contributors build reputation; high-rep contributors get faster review
  *   - Automated validation catches obvious errors (bad math, wrong format)
  *
- * For ATXP agents: use your ATXP account ID as contributorId.
  */
 
 import { executeSql } from '../_lib/db.js';
+import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { getSubject, getConcept } from '../_lib/curriculum.js';
 
 const CORS_HEADERS = {
@@ -29,7 +30,6 @@ interface LessonBody {
   type: 'lesson_module';
   conceptId: string;
   subjectId: string;
-  contributorId: string;
   contributorType?: 'agent' | 'human' | 'institution';
   content: {
     objective?: string;
@@ -173,19 +173,20 @@ export async function POST(request: Request) {
     const body = await request.json() as LessonBody;
 
     // Basic presence checks
-    if (!body.conceptId || !body.subjectId || !body.contributorId) {
+    // Same rule as contribute/quiz.ts: identity from the token. A lesson
+    // contribution follows the same review-to-publish path, so a
+    // caller-chosen name would let one person play both parts.
+    const auth = getAuthFromRequest(request);
+    if (!auth) return unauthorized();
+    const contributorId = String(auth.userId);
+
+    if (!body.conceptId || !body.subjectId) {
       return Response.json(
-        { error: 'conceptId, subjectId, and contributorId are required' },
+        { error: 'conceptId and subjectId are required' },
         { status: 400, headers: CORS_HEADERS }
       );
     }
 
-    if (body.contributorId.trim().length < 3) {
-      return Response.json(
-        { error: 'contributorId must be at least 3 characters' },
-        { status: 400, headers: CORS_HEADERS }
-      );
-    }
 
     // Verify the concept exists
     const subject = getSubject(body.subjectId);
@@ -231,7 +232,7 @@ export async function POST(request: Request) {
        VALUES ($1, $2, 'lesson_module', $3, $4, $5, $6, $7)
        RETURNING id`,
       [
-        body.contributorId,
+        contributorId,
         body.contributorType || 'human',
         body.subjectId,
         body.conceptId,
@@ -251,7 +252,7 @@ export async function POST(request: Request) {
          total_contributions = total_contributions + 1,
          last_contribution_at = datetime('now'),
          updated_at = datetime('now')`,
-      [body.contributorId, body.contributorType || 'human']
+      [contributorId, body.contributorType || 'human']
     );
 
     return Response.json(

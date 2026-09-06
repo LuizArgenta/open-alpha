@@ -9,7 +9,6 @@
  * Request body:
  * {
  *   contributionId: number,
- *   reviewerId: string,       // stable ID of the reviewer
  *   reviewerType?: 'agent' | 'human' | 'automated',
  *   decision: 'approve' | 'reject' | 'improve',
  *   feedback: string          // required — explain your reasoning
@@ -28,7 +27,7 @@
 
 import { executeSql } from '../_lib/db.js';
 import { type PublishOutcome, publishContribution } from '../_lib/publish-contribution.js';
-import { getAuthFromRequest } from '../_lib/auth.js';
+import { isDenied, requireStaff } from '../_lib/staff.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -38,7 +37,6 @@ const CORS_HEADERS = {
 
 interface ReviewBody {
   contributionId: number;
-  reviewerId: string;
   reviewerType?: 'agent' | 'human' | 'automated';
   decision: 'approve' | 'reject' | 'improve';
   feedback: string;
@@ -63,9 +61,27 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as ReviewBody;
 
-    if (!body.contributionId || !body.reviewerId || !body.decision) {
+    /**
+     * Identity comes from the token, never from the body.
+     *
+     * `reviewerId` used to be a string the caller chose, and the self-review
+     * guard compared it against another string the caller chose — so anyone
+     * could approve their own contribution twice by sending two names.
+     * `getAuthFromRequest` was imported here and never called, which is the
+     * tell: the authentication was intended and never wired.
+     *
+     * Teacher rather than merely signed-in, because approving now *publishes*
+     * into the curriculum, and `admin/curriculum/concepts.ts` already requires
+     * staff to do exactly that. Contributing stays open to any authenticated
+     * user: a contribution is a proposal, and review is what makes it content.
+     */
+    const access = await requireStaff(request, 'teacher');
+    if (isDenied(access)) return access;
+    const reviewerId = String(access.auth.userId);
+
+    if (!body.contributionId || !body.decision) {
       return Response.json(
-        { error: 'contributionId, reviewerId, and decision are required' },
+        { error: 'contributionId and decision are required' },
         { status: 400, headers: CORS_HEADERS }
       );
     }
@@ -107,7 +123,8 @@ export async function POST(request: Request) {
     }
 
     // Prevent self-review
-    if (contribution.contributor_id === body.reviewerId) {
+    // Real identities now, so this means something.
+    if (contribution.contributor_id === reviewerId) {
       return Response.json(
         { error: 'Contributors cannot review their own submissions' },
         { status: 403, headers: CORS_HEADERS }
@@ -117,7 +134,7 @@ export async function POST(request: Request) {
     // Check for duplicate review from same reviewer
     const existingReview = await executeSql<{ id: number }>(
       `SELECT id FROM contribution_reviews WHERE contribution_id = $1 AND reviewer_id = $2`,
-      [body.contributionId, body.reviewerId]
+      [body.contributionId, reviewerId]
     );
 
     if (existingReview.rows.length > 0) {
@@ -133,7 +150,7 @@ export async function POST(request: Request) {
        VALUES ($1, $2, $3, $4, $5)`,
       [
         body.contributionId,
-        body.reviewerId,
+        reviewerId,
         body.reviewerType || 'human',
         body.decision,
         body.feedback,
@@ -217,6 +234,7 @@ export async function POST(request: Request) {
         reviewRecorded: true,
         contributionId: body.contributionId,
         yourDecision: body.decision,
+        reviewerId,
         newStatus: publication?.published ? 'deployed' : newStatus,
         votesSoFar: { approve: approveCount, reject: rejectCount },
         ...(publication ? { publication } : {}),
