@@ -87,6 +87,45 @@ async function migrateGeneratedLessonsToPerLanguage(): Promise<void> {
 }
 
 /**
+ * assessment_responses' UNIQUE(attempt_id, item_id) only exists in the
+ * fresh-install CREATE TABLE above. An install whose table predates that
+ * constraint (anything before PR #20) has it recreated by the legacy
+ * migrations list below with `CREATE TABLE IF NOT EXISTS`, which no-ops on a
+ * table that already exists and never adds the constraint retroactively —
+ * so that install can silently accept two responses to the same item on the
+ * same attempt forever.
+ *
+ * The application already refuses to write a second response once it reads
+ * one back (`quiz/answer.ts`), so a healthy database should have no
+ * duplicates to clean up; this only matters for a database old enough, or
+ * unlucky enough under a race, to have gotten one anyway. Guarded the same
+ * way `migrateGeneratedLessonsToPerLanguage` is: check first, skip if the
+ * constraint is already there, so this is cheap on every cold start.
+ */
+async function ensureAssessmentResponsesUniqueConstraint(): Promise<void> {
+  const indexes = await client.execute('PRAGMA index_list(assessment_responses)');
+  const alreadyEnforced = indexes.rows.some(row => Number(row.unique) === 1);
+  if (alreadyEnforced) return;
+
+  // Rows with a null attempt_id or item_id are left alone: SQLite's UNIQUE
+  // never treats two nulls as equal, so they were never the constraint's
+  // concern, and GROUP BY would otherwise lump them together as if they were.
+  await client.execute(`
+    DELETE FROM assessment_responses
+    WHERE attempt_id IS NOT NULL AND item_id IS NOT NULL
+      AND id NOT IN (
+        SELECT MIN(id) FROM assessment_responses
+        WHERE attempt_id IS NOT NULL AND item_id IS NOT NULL
+        GROUP BY attempt_id, item_id
+      )
+  `);
+
+  await client.execute(
+    'CREATE UNIQUE INDEX idx_assessment_responses_attempt_item ON assessment_responses(attempt_id, item_id)'
+  );
+}
+
+/**
  * A statement queued inside a transaction, in the same shape executeSql takes.
  */
 export interface SqlStatement {
@@ -604,6 +643,7 @@ export async function initializeSchema(): Promise<void> {
   // Multi-step and not idempotent by accident, so it guards itself rather than
   // relying on the swallowed errors above.
   await migrateGeneratedLessonsToPerLanguage();
+  await ensureAssessmentResponsesUniqueConstraint();
 }
 
 export default { executeSql, initializeSchema };
