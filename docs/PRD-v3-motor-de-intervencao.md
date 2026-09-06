@@ -385,10 +385,12 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 
 ### Onda 1 — a mudança de contrato
 
+**O que o 1.2 encontrou de quebra**, nada disso na lista: o endpoint do navegador escrevia com `executeSql` puro, **fora da fila** — quarta ocorrência dessa classe no projeto, e num caminho que o cliente chama com `.catch(() => {})`, então a colisão aparecia como evento que simplesmente nunca existiu; `created_at` fazia dois trabalhos e errava um, porque o medidor de desperdício mede *intervalos entre* eventos e estava medindo entre os instantes de inserção; e o teste do caminho de upgrade esquecia a migração 008 sem esquecer a 009, simulando um banco que não pode existir.
+
 | # | PR | Critério de aceite |
 |---|---|---|
-| 1.1 | ADR de vocabulário e non-goals | Este documento no repositório. Sem mudança de runtime. |
-| 1.2 | Envelope canônico de evento v1 | `schema_version`, ids estáveis, idempotência. Eventos atuais compatíveis por adaptador. |
+| **1.1** ✅ | **ADR de vocabulário e non-goals** — [PR #56](https://github.com/LuizArgenta/open-alpha/pull/56) | [`docs/ADR-001-learning-event-contract.md`](./ADR-001-learning-event-contract.md). Registra os non-goals (não é event sourcing, não é auditoria de segurança, não é sync offline) e **o que ficou de fora do v1 e por quê** — `organization_id`, `actor_id`, `object_type`/`object_id` e `intervention_id` chegam com as entidades que lhes dão valor, não antes. |
+| **1.2** ✅ | **Envelope canônico de evento v1** — [PR #56](https://github.com/LuizArgenta/open-alpha/pull/56) | `event_id`, `schema_version`, `occurred_at` e `dedupe_key`, com o vocabulário numa única definição da qual o `CHECK` é construído — estava em três cópias e já divergia: o endpoint do navegador aceitava sete tipos onde o schema permite oito, então uma expiração não podia ser reportada. `dedupe_key` é separado do `event_id` de propósito: id de evento fornecido pelo cliente e único globalmente deixaria um aluno **suprimir o evento de outro**; sendo único por aluno, uma repetição só colide com o próprio autor. Linhas anteriores ao contrato são lidas como envelopes v1 pelo adaptador `toEnvelope`. |
 | 1.3 | `Intervention` + `InterventionRun` mínimas | Fluxo atual encapsulado como intervenção. Nada muda para o aluno. |
 | 1.4 | Decisão retorna `nextAction` | Motor responde ação; `nextConcept` interno por compatibilidade. |
 | 1.5 | Resultados de intervenção | `start`/`complete`/`outcome` alimentam stream e linha do tempo. |

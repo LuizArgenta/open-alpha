@@ -46,7 +46,23 @@ const TUTOR_LEVELS = [
 ];
 type TutorLevel = typeof TUTOR_LEVELS[number]['id'];
 
-// Fire-and-forget event tracking for timeback / waste meter
+/**
+ * Fire-and-forget event tracking for timeback / waste meter.
+ *
+ * Two fields the server needs and could not previously have.
+ *
+ * `occurredAt` is when the student did the thing. The waste meter infers focus
+ * from the gaps between events, and it was reading the gaps between the
+ * moments requests happened to land — so a slow network read as a student
+ * staring at the wall. The server discards a claimed time that is not
+ * credible; this is a report, not a fact.
+ *
+ * `dedupeKey` is what makes the retry below safe. Recording the same key
+ * twice for the same student is a no-op, so a resend of a request whose
+ * response was lost cannot turn one lesson start into two. Without it, adding
+ * a retry to a fire-and-forget call would be a way to inflate the waste meter
+ * on a bad connection.
+ */
 function trackEvent(
   token: string | null,
   subject: string,
@@ -55,14 +71,42 @@ function trackEvent(
   payload?: Record<string, unknown>
 ) {
   if (!token) return;
-  fetch('/api/progress/events', {
+
+  const body = JSON.stringify({
+    subject,
+    conceptId,
+    eventType,
+    payload,
+    occurredAt: new Date().toISOString(),
+    dedupeKey: retryToken(),
+  });
+
+  const send = () => fetch('/api/progress/events', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ subject, conceptId, eventType, payload }),
-  }).catch(() => {/* non-critical */});
+    body,
+  });
+
+  // One retry, with the same body and therefore the same key. Without the key
+  // this would be a way to double-count a lesson start; with it, the worst
+  // case is a write the server already has and discards.
+  send()
+    .then(response => (response.ok ? response : send()))
+    .catch(() => send())
+    .catch(() => {/* non-critical */});
+}
+
+/** A token for this one report, stable across its retry. */
+function retryToken(): string {
+  // randomUUID needs a secure context; a page served over plain http in
+  // development would otherwise throw inside a fire-and-forget call.
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 export default function Learn() {

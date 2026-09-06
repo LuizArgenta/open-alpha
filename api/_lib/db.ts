@@ -1,5 +1,15 @@
 import { createClient } from '@libsql/client';
 import { createHash } from 'crypto';
+import { eventTypeCheckList } from './event-contract.js';
+
+/**
+ * The event vocabulary, quoted for a CHECK constraint.
+ *
+ * Interpolated rather than written out so the constraint cannot drift from the
+ * list `event-contract.ts` declares. It drifted before: this file listed eight
+ * types and `progress/events.ts` accepted seven.
+ */
+const EVENT_TYPES = eventTypeCheckList();
 
 const client = createClient({
   url: process.env.TURSO_DATABASE_URL || 'file:local.db',
@@ -415,6 +425,96 @@ async function migrateLearningEventSource(): Promise<void> {
   );
 }
 
+/**
+ * The Learning Event Contract, v1, applied to an existing stream.
+ *
+ * Four columns, and each is here because something is wrong without it.
+ *
+ * **`event_id`** — the rowid is this database's private counter. Anything
+ * outside it that wants to refer to one event, deduplicate a replay, or
+ * reconcile two copies needs an identity the row carries with it. Backfilled
+ * for existing rows rather than left null, so no reader has to know that the
+ * stream has a before and an after: that is the whole point of the adapter in
+ * `event-contract.ts`.
+ *
+ * **`schema_version`** — a stream nobody can version is a stream nobody can
+ * change. Writing 1 on every row now is what makes a v2 reader able to tell
+ * what it is looking at later.
+ *
+ * **`occurred_at`** — separate from `created_at`, which was doing both jobs
+ * and getting one of them wrong. The browser posts lesson and hint events
+ * after the fact, and the waste meter measures the gaps *between* events to
+ * infer focus. A batch that arrives late currently reads as a burst of
+ * activity at the moment it landed. Backfilled to `created_at`, which is the
+ * best that was ever knowable about the old rows.
+ *
+ * **`dedupe_key`** — a client's retry token, kept apart from `event_id` on
+ * purpose. The obvious design lets the browser supply the event id and makes
+ * that unique, and it hands one student the ability to suppress another's
+ * event by writing their id first. The key is unique **per student**, so a
+ * replay can only ever collide with its own author's rows, and the identity
+ * stays server-generated and global.
+ *
+ * SQLite cannot add a UNIQUE column, so both uniqueness rules are indexes.
+ * `dedupe_key`'s is partial: every row written before it existed has none, and
+ * SQLite would otherwise treat each of those nulls as distinct anyway — the
+ * same shape as the xp_awards index below.
+ */
+async function migrateLearningEventEnvelope(): Promise<void> {
+  const columns = await client.execute('PRAGMA table_info(learning_events)');
+  const existing = new Set(columns.rows.map(row => String(row.name)));
+
+  if (!existing.has('event_id')) {
+    await client.execute('ALTER TABLE learning_events ADD COLUMN event_id TEXT');
+  }
+  if (!existing.has('schema_version')) {
+    await client.execute(
+      'ALTER TABLE learning_events ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1'
+    );
+  }
+  if (!existing.has('occurred_at')) {
+    await client.execute('ALTER TABLE learning_events ADD COLUMN occurred_at TEXT');
+  }
+  if (!existing.has('dedupe_key')) {
+    await client.execute('ALTER TABLE learning_events ADD COLUMN dedupe_key TEXT');
+  }
+
+  // A UUIDv4 per row, in SQL: randomblob is evaluated per row, so this does
+  // not stamp one id across the table. Done here rather than in application
+  // code because a backfill that has to page through rows is a backfill that
+  // can stop halfway.
+  await client.execute(`UPDATE learning_events SET event_id = lower(
+      hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
+      substr(hex(randomblob(2)), 2) || '-' ||
+      substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' ||
+      hex(randomblob(6))
+    ) WHERE event_id IS NULL`);
+
+  await client.execute(
+    'UPDATE learning_events SET occurred_at = created_at WHERE occurred_at IS NULL'
+  );
+
+  // If the backfill left a duplicate or a gap, the unique index below would
+  // fail and take the whole migration with it. Better to say which.
+  const unfilled = await client.execute(
+    'SELECT COUNT(*) AS n FROM learning_events WHERE event_id IS NULL'
+  );
+  if (Number(unfilled.rows[0].n) > 0) {
+    throw new Error(`${unfilled.rows[0].n} learning_events rows have no event_id after backfill`);
+  }
+
+  await client.execute(
+    'CREATE UNIQUE INDEX IF NOT EXISTS learning_events_event_id ON learning_events(event_id)'
+  );
+  await client.execute(
+    `CREATE UNIQUE INDEX IF NOT EXISTS learning_events_dedupe
+       ON learning_events(student_id, dedupe_key) WHERE dedupe_key IS NOT NULL`
+  );
+  await client.execute(
+    'CREATE INDEX IF NOT EXISTS learning_events_occurred ON learning_events(student_id, occurred_at)'
+  );
+}
+
 async function migrateLlmUsage(): Promise<void> {
   await client.execute(`CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -733,16 +833,29 @@ export async function initializeSchema(): Promise<void> {
     -- Learning events for waste meter / timeback tracking
     CREATE TABLE IF NOT EXISTS learning_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      -- The event's own identity, stable and independent of the rowid. What a
+      -- consumer outside this database refers to, and what makes recording
+      -- idempotent.
+      event_id TEXT,
+      -- Which version of the Learning Event Contract this row was written
+      -- under. See event-contract.ts.
+      schema_version INTEGER NOT NULL DEFAULT 1,
       student_id INTEGER REFERENCES users(id),
       subject TEXT NOT NULL,
       concept_id TEXT NOT NULL,
-      event_type TEXT NOT NULL CHECK (event_type IN ('lesson_start', 'lesson_end', 'quiz_start', 'quiz_answer', 'quiz_complete', 'quiz_expired', 'hint_request', 'idle_timeout')),
+      event_type TEXT NOT NULL CHECK (event_type IN (${EVENT_TYPES})),
       -- Who observed this. 'server' is a fact the engine knows; 'browser' is a
       -- report that may never have arrived.
       source TEXT NOT NULL DEFAULT 'browser',
       -- What the event is about, when it is about an attempt. Joins the stream
       -- back to the evidence.
       attempt_id INTEGER,
+      -- When it happened, as against created_at, when we heard about it. Equal
+      -- for server events; a browser report can arrive much later.
+      occurred_at TEXT,
+      -- A client's retry token, never its identity: unique per student, so one
+      -- learner's replay can never suppress another's event.
+      dedupe_key TEXT,
       payload TEXT DEFAULT '{}',
       created_at TEXT DEFAULT (datetime('now'))
     );
@@ -1122,6 +1235,7 @@ export async function initializeSchema(): Promise<void> {
     { id: '006-auth-attempts', run: migrateAuthAttempts },
     { id: '007-llm-usage', run: migrateLlmUsage },
     { id: '008-learning-event-source', run: migrateLearningEventSource },
+    { id: '009-learning-event-envelope', run: migrateLearningEventEnvelope },
   ]);
 }
 
