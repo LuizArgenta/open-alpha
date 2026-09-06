@@ -104,7 +104,7 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
   - [ ] **Retenção por categoria**, **exportação** e **exclusão** — continuam pendentes, e o aviso admite isso em vez de omitir. As três precisam existir antes de qualquer uso por quem não seja adulto consentindo.
   - [ ] **Linguagem infantil** — o aviso atual é para adulto. A versão para criança é outra escrita, não uma tradução.
   - [ ] **RIPD** — fora de PR, depende da revisão jurídica.
-- [ ] **26. Log de auditoria append-only** *(M)* — logins, mudanças de papel, publicações e acessos administrativos a dados infantis. → **onda 0.2 do v3**: o servidor escrevendo eventos é metade deste item.
+- [ ] **26. Log de auditoria append-only** *(M)* — logins, mudanças de papel, publicações e acessos administrativos a dados infantis. → **não é absorvido pela onda 0.2**, ao contrário do que esta linha dizia. O `CHECK` de `learning_events` só admite tipos de atividade de aprendizagem (`lesson_start`…`idle_timeout`); login, mudança de papel, publicação de currículo e acesso administrativo não cabem lá. Este item precisa de tabela append-only própria, e continua sem entrega planejada. Apontado na revisão do #51.
 - [ ] **27. Console de Guide** *(G)* — fila de intervenções priorizadas, histórico, notas privadas, acordos com o aluno, separação entre observação e inferência algorítmica. → **onda 3 do v3** (fila de intervenções do professor). Depende de 0.1.
 - [ ] **28. Turmas, grupos e matrículas** *(M)* — uma escola não é um conjunto de famílias avulsas.
 - [ ] **29. Painel do responsável completo** *(M)* — metas, limites de uso, exportação, controle de compartilhamento.

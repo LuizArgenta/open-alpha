@@ -57,7 +57,11 @@ Esta é a parte que separa este documento do memorando que o originou. As abstra
 
 ### 5.1 Os metadados pedagógicos não chegam a nenhuma decisão
 
-`difficulty_tag`, `skill_tag`, `reasoning_type`, `distractor_error_code` e `pedagogical_rationale` são escritos, validados e indexados. **Nenhum `SELECT` no repositório lê qualquer um deles.**
+`difficulty_tag`, `skill_tag`, `reasoning_type`, `distractor_error_code` e `pedagogical_rationale` têm coluna, validação e índice. **Nenhum `SELECT` no repositório lê qualquer um deles — e nada escreve valor neles.**
+
+Medido: das **45 perguntas autoradas** do currículo, **zero** trazem qualquer um dos cinco campos. E o prompt de geração em `llm.ts` pede apenas pergunta, opções, resposta e explicação. O `snapshotItem` não infere nada — é passagem pura com defaults. Então no banco hoje `difficulty_tag` é `'medium'` em todo item, `skill_tag` e `reasoning_type` são `NULL`, `distractor_error_code` é `{}`.
+
+O cano está vazio nas duas pontas. **Consumir esses campos sem antes produzi-los não distingue nada** — foi um erro na primeira versão deste documento, apontado na revisão do #51.
 
 `diagnoseAttempt` recebe exatamente `{correct, responseTimeMs, at}` — acertou, quanto demorou, quando. Um aluno com três erros da mesma concepção equivocada e outro com três erros distintos recebem diagnóstico idêntico.
 
@@ -143,7 +147,7 @@ resolvedor de política (aluno > turma > organização > global)
 adaptador de provedor
 ```
 
-**Estado atual:** `LLM_BASE_URL` é constante fixa apontando para a ATXP. Torná-la configurável é mudança de cinco linhas e é o que faz o teste da seção 4 passar no escopo do deploy. Política por escopo é trabalho de verdade e só paga quando houver escolas.
+**Estado atual:** `LLM_BASE_URL` é constante fixa apontando para a ATXP, **e o id do modelo está fixo em cinco lugares** como `claude-sonnet-4-6`. Trocar só a URL não basta: um servidor local compatível não expõe esse nome e recusa toda requisição. O item 0.3 precisa de seleção de modelo por capacidade, não de uma variável de ambiente. Ainda é pequeno; não é de cinco linhas, como esta seção afirmou antes. Política por escopo é outro tamanho e só paga quando houver escolas.
 
 **Tensão a decidir, não a descobrir:** a telemetria proposta registra invocação por aluno. O `recordUsage` atual **deliberadamente não guarda id de usuário**, para que o teto de gasto exista sem criar um log de quem perguntou o quê e quando — e `/data` afirma isso ao usuário. Se virar auditável por aluno, o aviso muda junto.
 
@@ -179,9 +183,10 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 
 | # | PR | Critério de aceite |
 |---|---|---|
-| **0.1** | **Metadados pedagógicos no diagnóstico** | `loadAttemptAnswers` carrega `distractor_error_code`, `difficulty_tag` e `skill_tag`; `diagnoseAttempt` distingue *três erros pela mesma causa* de *três erros distintos*. Teste que falha se os dois casos derem o mesmo diagnóstico. |
+| **0.1a** | **Produzir a evidência pedagógica** | O prompt de geração pede `distractorErrorCode` por opção errada, `skillTag` e `reasoningType`; a validação recusa item cujos códigos não cubram seus distratores. É de onde vem o dado para 94% do currículo. As 45 perguntas autoradas precisam de backfill — trabalho de conteúdo, e são 6%. |
+| **0.1b** | **Consumir no diagnóstico** | `loadAttemptAnswers` carrega o código; `diagnoseAttempt` distingue *três erros pela mesma causa* de *três erros distintos*. Teste que falha se os dois casos derem o mesmo diagnóstico — e que roda contra o caminho real do item, não contra fixtures. |
 | **0.2** | **Servidor como escritor de eventos** | Abrir tentativa, corrigir resposta, finalizar, decidir e conceder XP emitem evento. Teste: fazer uma prova sem o navegador reportar nada produz stream completo. |
-| **0.3** | **Endpoint de modelo configurável** | `LLM_BASE_URL` vem do ambiente, com a ATXP como padrão. Sobe contra endpoint local compatível. |
+| **0.3** | **Endpoint *e modelo* configuráveis** | `LLM_BASE_URL` **e** o id do modelo vêm da configuração, por capacidade, com a ATXP e `claude-sonnet-4-6` como padrão. Hoje o modelo está fixo em cinco lugares, então só tornar a URL configurável ainda quebra contra qualquer servidor local, que não expõe esse nome. Critério: sobe contra endpoint compatível servindo um modelo de nome próprio. |
 | **0.4** | **Contribuição aprovada chega ao aluno** | Uma contribuição `approved` vira conceito ou item publicado e passa a `'deployed'`. Teste: professor contribui → dois revisores aprovam → um aluno senta a prova. Hoje esse teste é impossível de escrever. |
 
 ### Onda 1 — a mudança de contrato
@@ -232,7 +237,7 @@ Princípio: PRs pequenos, cada um com uma mudança de contrato testável. Não m
 
 | | Memorando | Aqui | Por quê |
 |---|---|---|---|
-| Metadados no diagnóstico | ausente | **0.1, primeiro** | Pré-requisito não declarado do diferencial dele |
+| Metadados no diagnóstico | ausente | **0.1a produz, 0.1b consome** | Pré-requisito não declarado do diferencial dele — e o cano está vazio nas duas pontas |
 | Último metro da contribuição | ausente | **0.4** | Sem ele o grafo colaborativo é aspiracional |
 | Servidor escrevendo eventos | ausente | **0.2, antes do contrato** | Canonizar um stream com buracos os torna permanentes |
 | Abstração de IA | onda 1 completa | 0.3 barato agora, política na onda 4 | Política por escopo não paga sem escolas |
