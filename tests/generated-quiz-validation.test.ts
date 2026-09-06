@@ -140,3 +140,67 @@ describe('a generated quiz the model got right', () => {
     expect((await openQuiz(token)).status).toBe(200);
   });
 });
+
+describe('the whole path, from a generated item to a recorded diagnosis', () => {
+  /**
+   * The test that could not be written before this wave: it starts at the
+   * model's output and ends at what the engine concluded, with nothing stubbed
+   * in between. Written against the real item path on purpose — the first
+   * version of this design passed every unit test while the columns it read
+   * were empty, because the tests inserted their own fixtures.
+   */
+  it('names the misunderstanding a student repeated', async () => {
+    generateQuizQuestions.mockResolvedValue(quizWith({
+      skillTag: 'sense_identification',
+      reasoningType: 'recall',
+      distractorErrorCode: {
+        'B': 'confuses_hearing_with_sight',
+        'C': 'confuses_taste_with_sight',
+        'D': 'confuses_touch_with_sight',
+      },
+    }));
+
+    const opened = await (await openQuiz(token)).json() as {
+      attemptId: number;
+      questions: { itemId: number }[];
+    };
+
+    const { POST: answerQuiz } = await import('../api/tutor/quiz/answer.js');
+    const { POST: submitQuiz } = await import('../api/tutor/quiz/submit.js');
+    const call = (handler: (r: Request) => Promise<Response>, body: unknown) =>
+      handler(new Request('https://test.local/api', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }));
+
+    // Three answers wrong the same way, at a considered pace, then two right.
+    for (const [index, question] of opened.questions.entries()) {
+      await call(answerQuiz, {
+        attemptId: opened.attemptId,
+        itemId: question.itemId,
+        chosen: index < 3 ? 'B' : 'A',
+        responseTimeMs: 30_000,
+      });
+    }
+
+    const result = await (await call(submitQuiz, { attemptId: opened.attemptId })).json() as {
+      diagnosis: string;
+    };
+
+    expect(result.diagnosis).toBe('recurring_misconception');
+
+    // And it is contestable: the grounds are in the decision log, not only in
+    // the response the student happened to see.
+    const decision = await executeSql<{ inputs: string }>(
+      `SELECT inputs FROM learning_decisions
+       WHERE student_id = (SELECT student_id FROM assessment_attempts WHERE id = $1)
+         AND kind = 'diagnosis'`,
+      [opened.attemptId]
+    );
+    expect(JSON.parse(decision.rows[0].inputs).misconception).toEqual({
+      code: 'confuses_hearing_with_sight',
+      count: 3,
+    });
+  });
+});

@@ -121,6 +121,7 @@ export const ptBR = {
   // ── Attempt diagnosis (Phase 3) ───────────────────────────────────────────
   'diagnosis.rapidGuessing': 'Você respondeu {rapid} de {total} perguntas em menos de {seconds} segundos. Vá com calma e leia cada uma — assim essa nota ainda não diz o que você sabe.',
   'diagnosis.distraction': 'Parece que você saiu no meio da prova. Tente de novo de uma vez só, para o resultado refletir o que você sabe.',
+  'diagnosis.recurringMisconception': 'Você cometeu o mesmo tipo de erro {count} vezes. Isso é útil — quer dizer que tem uma ideia só para acertar, não várias separadas.',
 
   // ── Focus meter (Phase 4) ─────────────────────────────────────────────────
   'focus.title': 'Medidor de foco',

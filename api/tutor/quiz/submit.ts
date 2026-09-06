@@ -64,6 +64,31 @@ interface StoredAnswerRow {
   correct: number;
   response_ms: number | null;
   answered_at: string;
+  chosen: string | null;
+  distractor_error_code: string | null;
+}
+
+/**
+ * The misunderstanding behind the option this student actually picked.
+ *
+ * The item stores a map from option label to a code naming why someone would
+ * choose it. Undefined here means "not recorded" — the item predates the
+ * metadata, or the model named no cause — and never "no shared cause". The
+ * diagnosis treats the two differently, which is the whole reason the
+ * validation refuses partially-filled codes.
+ */
+function errorCodeFor(row: StoredAnswerRow): string | undefined {
+  if (row.correct === 1 || row.chosen === null || row.distractor_error_code === null) {
+    return undefined;
+  }
+  try {
+    const codes = JSON.parse(row.distractor_error_code) as Record<string, string>;
+    const code = codes[row.chosen];
+    return typeof code === 'string' && code.length > 0 ? code : undefined;
+  } catch {
+    // A malformed blob is one item without a code, not a failed submission.
+    return undefined;
+  }
 }
 
 /**
@@ -77,9 +102,11 @@ async function loadAttemptAnswers(
   attemptId: number
 ): Promise<AnswerEvent[]> {
   const rows = await run<StoredAnswerRow>(
-    `SELECT r.correct, r.response_ms, r.answered_at
+    `SELECT r.correct, r.response_ms, r.answered_at, r.chosen,
+            item.distractor_error_code
      FROM assessment_responses r
      JOIN assessment_attempt_items i ON i.attempt_id = r.attempt_id AND i.item_id = r.item_id
+     JOIN assessment_items item ON item.id = r.item_id
      WHERE r.attempt_id = $1
      ORDER BY i.position`,
     [attemptId]
@@ -89,6 +116,7 @@ async function loadAttemptAnswers(
     correct: row.correct === 1,
     responseTimeMs: row.response_ms ?? undefined,
     at: row.answered_at,
+    errorCode: errorCodeFor(row),
   }));
 }
 
@@ -331,7 +359,15 @@ export async function POST(request: Request) {
           kind: 'diagnosis',
           decision: diagnosis.pattern,
           reason: passed ? 'passed' : 'failed',
-          inputs: { score, answers: answers.length, rapidThresholdMs },
+          // The misconception rides along: a decision about someone has to be
+          // contestable, and "you made the same mistake twice" is the part
+          // they would want to see.
+          inputs: {
+            score,
+            answers: answers.length,
+            rapidThresholdMs,
+            ...(diagnosis.misconception ? { misconception: diagnosis.misconception } : {}),
+          },
         })
       );
 
