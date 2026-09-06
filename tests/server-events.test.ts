@@ -130,3 +130,57 @@ describe('the stream never costs a learner their work', () => {
     expect(attempt.rows[0].finished_at).not.toBeNull();
   });
 });
+
+describe('a database that predates the event stream', () => {
+  /**
+   * Found by running the migration against an old database rather than a fresh
+   * one, minutes before merging.
+   *
+   * The first version of migration 008 added the columns and left the CHECK
+   * alone, reasoning that the application is the only writer. An existing
+   * database does not merely lack a guard — it *rejects* `quiz_expired`. And
+   * because recordEvent never throws, every expiry on a deployment with
+   * history would have failed silently, on exactly the databases that have
+   * users.
+   *
+   * This is the divergence between a fresh schema and a migrated one that
+   * item 8 of the plan exists to prevent, and only the upgrade path shows it.
+   */
+  it('accepts the event types the server now emits', async () => {
+    const { forgetMigration } = await import('./helpers/database.js');
+    const { initializeSchema } = await import('../api/_lib/db.js');
+
+    // Rebuild the pre-008 shape, rows and all.
+    await executeSql('DROP TABLE learning_events');
+    await executeSql(`CREATE TABLE learning_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      subject TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK (event_type IN ('lesson_start', 'lesson_end', 'quiz_start', 'quiz_answer', 'quiz_complete', 'hint_request', 'idle_timeout')),
+      payload TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT (datetime('now'))
+    )`);
+    await executeSql(
+      `INSERT INTO learning_events (subject, concept_id, event_type, payload)
+       VALUES ('math', 'frac', 'lesson_start', '{"kept":true}')`
+    );
+    await forgetMigration('008-learning-event-source');
+
+    await initializeSchema();
+
+    // The row this migration exists to preserve is still here, unaltered.
+    const kept = await executeSql<{ payload: string; source: string }>(
+      "SELECT payload, source FROM learning_events WHERE event_type = 'lesson_start'"
+    );
+    expect(JSON.parse(kept.rows[0].payload)).toEqual({ kept: true });
+    // Classified as browser, which is what it was: nothing else wrote here.
+    expect(kept.rows[0].source).toBe('browser');
+
+    // And the constraint now admits what the server emits.
+    await expect(executeSql(
+      `INSERT INTO learning_events (subject, concept_id, event_type, source)
+       VALUES ('math', 'frac', 'quiz_expired', 'server')`
+    )).resolves.toBeDefined();
+  });
+});

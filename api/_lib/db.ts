@@ -355,10 +355,61 @@ async function migrateLearningEventSource(): Promise<void> {
     await client.execute('ALTER TABLE learning_events ADD COLUMN attempt_id INTEGER');
   }
 
-  // SQLite cannot alter a CHECK in place, and rebuilding the table to widen an
-  // enum would risk the rows this migration exists to preserve. The constraint
-  // lives in the schema for new databases; existing ones are guarded by the
-  // application, which is the only writer.
+  /**
+   * The CHECK has to be widened, not left alone.
+   *
+   * A first version of this migration added the columns and reasoned that the
+   * old constraint was harmless because the application is the only writer.
+   * That was wrong in a way only the upgrade path shows: an existing database
+   * does not merely lack a guard, it *actively rejects* `quiz_expired`. And
+   * since recordEvent never throws, every expiry on a deployment with history
+   * would have failed silently — precisely the databases that have users.
+   *
+   * SQLite cannot alter a CHECK, so the table is rebuilt. The row count is
+   * verified before the original is dropped: this migration exists to preserve
+   * those rows, and a rebuild that loses them would be worse than the bug.
+   */
+  const constraint = await client.execute(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'learning_events'"
+  );
+  const definition = String(constraint.rows[0]?.sql ?? '');
+  if (definition.includes('quiz_expired')) {
+    await client.execute(
+      'CREATE INDEX IF NOT EXISTS learning_events_attempt ON learning_events(attempt_id)'
+    );
+    return;
+  }
+
+  const before = await client.execute('SELECT COUNT(*) AS n FROM learning_events');
+  const rowsBefore = Number(before.rows[0].n);
+
+  await client.execute(`CREATE TABLE learning_events_rebuilt (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER REFERENCES users(id),
+    subject TEXT NOT NULL,
+    concept_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('lesson_start', 'lesson_end', 'quiz_start', 'quiz_answer', 'quiz_complete', 'quiz_expired', 'hint_request', 'idle_timeout')),
+    source TEXT NOT NULL DEFAULT 'browser',
+    attempt_id INTEGER,
+    payload TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  await client.execute(`INSERT INTO learning_events_rebuilt
+      (id, student_id, subject, concept_id, event_type, source, attempt_id, payload, created_at)
+    SELECT id, student_id, subject, concept_id, event_type, source, attempt_id, payload, created_at
+    FROM learning_events`);
+
+  const copied = await client.execute('SELECT COUNT(*) AS n FROM learning_events_rebuilt');
+  if (Number(copied.rows[0].n) !== rowsBefore) {
+    await client.execute('DROP TABLE learning_events_rebuilt');
+    throw new Error(
+      `learning_events rebuild copied ${copied.rows[0].n} of ${rowsBefore} rows; refusing to drop the original`
+    );
+  }
+
+  await client.execute('DROP TABLE learning_events');
+  await client.execute('ALTER TABLE learning_events_rebuilt RENAME TO learning_events');
   await client.execute(
     'CREATE INDEX IF NOT EXISTS learning_events_attempt ON learning_events(attempt_id)'
   );
