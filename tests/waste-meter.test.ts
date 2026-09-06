@@ -136,3 +136,41 @@ describe('focus meter', () => {
     expect(response.status).toBe(401);
   });
 });
+
+/**
+ * The bug the Learning Event Contract's `occurred_at` exists to fix.
+ *
+ * This meter infers focus from the gaps *between* events, and it was reading
+ * the gaps between the moments rows were inserted. The browser posts lesson
+ * and hint events after the fact and now retries the ones it drops, so a batch
+ * landing together read as a student who had sat still for the interval.
+ */
+describe('a report that arrives late', () => {
+  async function report(eventType: string, occurredAt: string, payload: unknown = {}) {
+    const { POST } = await import('../api/progress/events.js');
+    return POST(new Request('https://test.local/api/progress/events', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ subject: 'math', conceptId: STANDARD, eventType, occurredAt, payload }),
+    }));
+  }
+
+  it('is counted at the moment the student did it, not when it landed', async () => {
+    const start = new Date(Date.now() - 20 * 60 * 1000);
+    const end = new Date(start.getTime() + 12 * 60 * 1000);
+
+    // Both posted now, in one burst, describing twelve minutes of lesson.
+    await report('lesson_start', start.toISOString());
+    await report('lesson_end', end.toISOString());
+
+    const { GET: getTimebackFresh } = await import('../api/progress/timeback.js');
+    const body = await (await getTimebackFresh(new Request(
+      'https://test.local/api/progress/timeback',
+      { headers: { authorization: `Bearer ${token}` } }
+    ))).json() as { today: { lessonMinutes: number } };
+
+    // Insertion times would make this zero: the two rows land in the same
+    // second. Twelve minutes is what actually happened.
+    expect(body.today.lessonMinutes).toBe(12);
+  });
+});

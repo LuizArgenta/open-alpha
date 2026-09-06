@@ -1,4 +1,5 @@
 import { executeSql } from '../_lib/db.js';
+import { readEvents } from '../_lib/events.js';
 import { parseDbTimestamp } from '../_lib/time.js';
 import { getAuthFromRequest, unauthorized } from '../_lib/auth.js';
 import { getConcept } from '../_lib/curriculum.js';
@@ -13,14 +14,6 @@ interface FocusReason {
   points: number;
   contestable: boolean;
   contested: boolean;
-}
-
-interface LearningEvent {
-  event_type: string;
-  payload: string;
-  created_at: string;
-  concept_id: string;
-  subject: string;
 }
 
 interface ProgressRow {
@@ -46,17 +39,23 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const subject = url.searchParams.get('subject') || null;
 
-    // Get today's learning events
-    const eventsResult = await executeSql<LearningEvent>(
-      `SELECT event_type, payload, created_at, concept_id, subject
-       FROM learning_events
-       WHERE student_id = $1
-         AND created_at >= date('now')
-       ORDER BY created_at ASC`,
-      [auth.userId]
+    /**
+     * Today's events, as envelopes.
+     *
+     * Read through the contract rather than off the table, which is the point
+     * of having one: this loop measures the *gaps between* events to infer
+     * focus, and it was measuring them between the moments rows were inserted.
+     * A browser posts lesson and hint events after the fact and retries the
+     * ones it drops, so a batch landing together read as a burst of activity
+     * that never happened. `occurredAt` is when the student did it.
+     */
+    const todayStart = await executeSql<{ start: string }>(
+      "SELECT datetime(date('now')) AS start"
     );
-
-    const events = eventsResult.rows;
+    const events = await readEvents({
+      studentId: auth.userId,
+      since: todayStart.rows[0].start,
+    });
 
     // Calculate focus metrics
     let totalLessonTimeMs = 0;
@@ -74,32 +73,36 @@ export async function GET(request: Request) {
     let previousAnswerAt: string | null = null;
 
     for (const event of events) {
-      conceptsStudiedToday.add(event.concept_id);
+      conceptsStudiedToday.add(event.conceptId);
 
-      switch (event.event_type) {
+      switch (event.type) {
         case 'lesson_start':
-          lessonStartTime = event.created_at;
+          lessonStartTime = event.occurredAt;
           break;
         case 'lesson_end':
           if (lessonStartTime) {
-            totalLessonTimeMs += parseDbTimestamp(event.created_at).getTime() - parseDbTimestamp(lessonStartTime).getTime();
+            totalLessonTimeMs += parseDbTimestamp(event.occurredAt).getTime() - parseDbTimestamp(lessonStartTime).getTime();
             lessonStartTime = null;
           }
           break;
         case 'quiz_start':
-          quizStartTime = event.created_at;
+          quizStartTime = event.occurredAt;
           break;
         case 'quiz_answer': {
           totalAnswers++;
-          const payload = JSON.parse(event.payload || '{}');
+          const payload = event.payload;
           if (payload.correct) correctAnswers++;
 
           // What counts as rushed depends on the question: a two-second answer
           // is plausible for counting and not for an advanced concept.
           const threshold = rapidAnswerThresholdMs(
-            getConcept(event.subject, event.concept_id)?.metadata?.difficulty
+            getConcept(event.subject, event.conceptId)?.metadata?.difficulty
           );
-          if (payload.responseTimeMs !== undefined && payload.responseTimeMs < threshold) {
+          // Typed as unknown by the envelope, which is what caught this: the
+          // old read was `!== undefined`, and a null response time would have
+          // coerced to 0 and counted as a rapid guess against the student.
+          const responseTimeMs = payload.responseTimeMs;
+          if (typeof responseTimeMs === 'number' && responseTimeMs < threshold) {
             rapidGuessCount++;
           }
 
@@ -108,16 +111,16 @@ export async function GET(request: Request) {
           // answers is what actually shows a student leaving mid-quiz.
           if (
             previousAnswerAt &&
-            parseDbTimestamp(event.created_at).getTime() - parseDbTimestamp(previousAnswerAt).getTime() >= WALKED_AWAY_MS
+            parseDbTimestamp(event.occurredAt).getTime() - parseDbTimestamp(previousAnswerAt).getTime() >= WALKED_AWAY_MS
           ) {
             walkedAwayCount++;
           }
-          previousAnswerAt = event.created_at;
+          previousAnswerAt = event.occurredAt;
           break;
         }
         case 'quiz_complete':
           if (quizStartTime) {
-            totalQuizTimeMs += parseDbTimestamp(event.created_at).getTime() - parseDbTimestamp(quizStartTime).getTime();
+            totalQuizTimeMs += parseDbTimestamp(event.occurredAt).getTime() - parseDbTimestamp(quizStartTime).getTime();
             quizStartTime = null;
           }
           break;

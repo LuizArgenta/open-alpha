@@ -40,3 +40,17 @@ export function daysSince(from: string, now: Date = new Date()): number {
   const MS_PER_DAY = 1000 * 60 * 60 * 24;
   return Math.floor((now.getTime() - parseDbTimestamp(from).getTime()) / MS_PER_DAY);
 }
+
+/**
+ * Writes a timestamp in the one shape this schema uses.
+ *
+ * `datetime('now')` produces `YYYY-MM-DD HH:MM:SS` in UTC, and every stored
+ * timestamp is that. A client-supplied ISO string is the same instant in a
+ * different notation, and storing it verbatim would put two notations in one
+ * column: `date(...)` copes, but ordering does not — `'…T22:00:00Z'` sorts
+ * after `'… 23:00:00'` on a plain string compare, so two rows a minute apart
+ * could come back in the wrong order depending on which wrote them.
+ */
+export function toDbTimestamp(value: Date): string {
+  return value.toISOString().replace('T', ' ').slice(0, 19);
+}

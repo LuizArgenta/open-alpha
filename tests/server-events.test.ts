@@ -165,7 +165,19 @@ describe('a database that predates the event stream', () => {
       `INSERT INTO learning_events (subject, concept_id, event_type, payload)
        VALUES ('math', 'frac', 'lesson_start', '{"kept":true}')`
     );
+    // Every migration from 008 on, not only 008. A database that predates the
+    // event stream predates the envelope too, and forgetting one without the
+    // other simulates something that cannot exist: a schema carrying 009's
+    // columns while 008 has never run. The helper's own comment says what that
+    // is — a database vandalised behind the migrator's back, which the
+    // migrator is not meant to repair.
+    //
+    // It matters beyond bookkeeping. 008 rebuilds the table from a column list
+    // frozen at 008, so re-running it on a database that already has the
+    // envelope drops those columns silently. Ordering is what prevents that,
+    // and this is the test that would notice if ordering stopped holding.
     await forgetMigration('008-learning-event-source');
+    await forgetMigration('009-learning-event-envelope');
 
     await initializeSchema();
 
@@ -182,5 +194,54 @@ describe('a database that predates the event stream', () => {
       `INSERT INTO learning_events (subject, concept_id, event_type, source)
        VALUES ('math', 'frac', 'quiz_expired', 'server')`
     )).resolves.toBeDefined();
+  });
+
+  /**
+   * The upgrade path all the way to the current contract, not just to 008.
+   *
+   * A migrated database and a fresh one must end up the same shape — that is
+   * the divergence item 8 exists to prevent, and the only way to see it is to
+   * run the chain against an old database and compare.
+   */
+  it('arrives at the full envelope, and keeps the rows it started with', async () => {
+    const { forgetMigration } = await import('./helpers/database.js');
+    const { initializeSchema } = await import('../api/_lib/db.js');
+
+    await executeSql('DROP TABLE learning_events');
+    await executeSql(`CREATE TABLE learning_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER REFERENCES users(id),
+      subject TEXT NOT NULL,
+      concept_id TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK (event_type IN ('lesson_start', 'lesson_end', 'quiz_start', 'quiz_answer', 'quiz_complete', 'hint_request', 'idle_timeout')),
+      payload TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT (datetime('now'))
+    )`);
+    await executeSql(
+      `INSERT INTO learning_events (subject, concept_id, event_type, payload, created_at)
+       VALUES ('math', 'frac', 'lesson_start', '{"kept":true}', '2020-01-01 10:00:00')`
+    );
+    await forgetMigration('008-learning-event-source');
+    await forgetMigration('009-learning-event-envelope');
+
+    await initializeSchema();
+
+    const columns = await executeSql<{ name: string }>('PRAGMA table_info(learning_events)');
+    const names = new Set(columns.rows.map(row => String(row.name)));
+    for (const column of ['event_id', 'schema_version', 'occurred_at', 'dedupe_key']) {
+      expect(names).toContain(column);
+    }
+
+    // Backfilled rather than left null, which is the compatibility promise: no
+    // reader should have to know the stream has a before and an after.
+    const migrated = await executeSql<{
+      event_id: string; schema_version: number; occurred_at: string; payload: string;
+    }>("SELECT event_id, schema_version, occurred_at, payload FROM learning_events WHERE event_type = 'lesson_start'");
+    const row = migrated.rows[0];
+    expect(JSON.parse(row.payload)).toEqual({ kept: true });
+    expect(row.event_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(Number(row.schema_version)).toBe(1);
+    // The best that was ever knowable about an old row: when we heard of it.
+    expect(row.occurred_at).toBe('2020-01-01 10:00:00');
   });
 });
