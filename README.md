@@ -1,6 +1,7 @@
 # Open Alpha
 
-**Free AI-powered tutoring for K-12 students and support for parents.**
+**An open learning engine that works out what a student needs, does the smallest
+thing that helps, and checks whether it worked.**
 
 Try it now: **[open-alpha-eta.vercel.app](https://open-alpha-eta.vercel.app)**
 
@@ -8,9 +9,65 @@ Try it now: **[open-alpha-eta.vercel.app](https://open-alpha-eta.vercel.app)**
 
 ## What is Open Alpha?
 
-Open Alpha is a learning platform where students get their own AI tutor that adapts to their grade level and learning pace. Parents get a separate AI coach to help them support their child's education at home.
+Most learning software is a place you go. Open Alpha is meant to be a layer of
+judgement over learning wherever it already happens.
+
+It watches what a student actually does — every answer, how long it took, which
+wrong option they picked — forms an estimate of what they know, decides the
+smallest useful intervention, and then measures whether that intervention
+worked.
+
+```
+evidence → what they know → decision → intervention → outcome
+    ↑                                                    │
+    └────────────────────────────────────────────────────┘
+```
+
+A lesson is one kind of intervention. So is a hint, a worked example, a short
+practice set, a question that probes a suspicion, a link to the school's own
+textbook, or a nudge telling a teacher that this student needs five minutes of
+a human being's attention.
+
+**The goal is not to keep anyone in the app.** It is to close the gap with the
+least intervention necessary and hand the student back to whatever they were
+doing.
+
+**What this implies:** a school does not have to replace what it already uses.
+Open Alpha is designed to work over someone else's textbook, someone else's
+lessons, someone else's tests — as the adaptive layer, not the destination.
+
+Read the architecture this is heading towards in
+[docs/PRD-v3-motor-de-intervencao.md](./docs/PRD-v3-motor-de-intervencao.md)
+(Portuguese), including an honest list of what does not work yet.
 
 No subscriptions. No ads. Just learning.
+
+---
+
+## Where it actually is today
+
+This is an experimental platform being tested with consenting adults. It is not
+ready for children, and the README should not pretend otherwise.
+
+**Works, and is tested:** quizzes graded on the server (never by the browser),
+every attempt tied to an immutable snapshot of the items it showed, mastery and
+spaced review, error-type diagnosis, a focus signal the learner can dispute, a
+decision log, parent linking, XP tied to evidence, versioned migrations that
+refuse to start half-applied, backup and restore, a spending ceiling on model
+calls, and rate-limited authentication.
+
+**Does not work yet, and is on the roadmap:**
+
+- **Content coverage is 6%.** Of 141 concepts, 9 have authored mastery checks.
+  The other 94% generate their questions from a language model on demand. No
+  selection algorithm fixes that; it is authoring work.
+- **The pedagogical metadata is recorded but unused.** Each item stores the
+  misconception behind each wrong option — and no query reads it yet. Three
+  mistakes from one misunderstanding and three unrelated mistakes currently
+  produce the same diagnosis.
+- **No self-service export or deletion**, and no defined retention period. See
+  [what this stores about you](https://open-alpha-eta.vercel.app/data).
+- **No school layer.** No classes, no roster, no teacher queue.
 
 ---
 
@@ -105,7 +162,12 @@ This isn't about speed - it's about actually understanding the material before m
 Yes. Open Alpha runs on free hosting and database tiers. The AI is powered by ATXP, which provides generous free usage.
 
 **Is my child's data safe?**
-We store only what's needed: email, progress, and chat history for tutoring context. We don't sell data or show ads.
+Not yet suitable for children — see "Where it actually is today" above. For
+adults testing it, [/data](https://open-alpha-eta.vercel.app/data) lists every
+table, what is kept and why, in plain language: it says that the system forms
+judgements about you, that conversations go to a third-party model provider,
+and that self-service export and deletion do not exist yet. We don't sell data
+or show ads.
 
 **What ages is this for?**
 Kindergarten through 12th grade. The AI adapts its language and difficulty to the student's grade level.
@@ -122,7 +184,7 @@ Check their progress in your parent dashboard, then chat with the parent coach f
 
 Open Alpha is open source. You can see exactly how it works, suggest improvements, or run your own instance.
 
-**Repository**: [github.com/lamira-the-human/open-alpha](https://github.com/lamira-the-human/open-alpha)
+**Repository**: [github.com/LuizArgenta/open-alpha](https://github.com/LuizArgenta/open-alpha)
 
 ---
 
@@ -135,16 +197,21 @@ Open Alpha is open source. You can see exactly how it works, suggest improvement
 | Component | Technology |
 |-----------|------------|
 | Frontend | React + Vite |
-| API | Vercel Serverless Functions |
-| Database | Turso (SQLite-compatible edge DB) |
-| AI | ATXP LLM Gateway (Claude, GPT, Gemini) |
-| Hosting | Vercel |
+| API | Handlers in `api/`, taking a Web `Request` and returning a `Response` |
+| Database | libsql — a local SQLite file, or Turso |
+| AI | OpenAI-compatible endpoint (currently the ATXP gateway) |
+| Hosting | Vercel, or a container anywhere (`Dockerfile` + `server/`) |
+
+The handlers are plain functions over the Web `Request`/`Response` types, so
+they run under Vercel's file-based routing *and* under `server/routes.ts`,
+which reproduces that mapping in one Node process. Nothing about the API is
+tied to a hosting provider.
 
 ### Local Development
 
 ```bash
 # Clone the repo
-git clone https://github.com/lamira-the-human/open-alpha.git
+git clone https://github.com/LuizArgenta/open-alpha.git
 cd open-alpha
 
 # Install dependencies
@@ -168,10 +235,14 @@ open-alpha/
 │   ├── coach/           # Parent AI chat
 │   ├── parent/          # Child linking, progress viewing
 │   └── progress/        # Student progress tracking
+├── server/              # Runs the same handlers as one Node process
+├── scripts/             # Backup, restore, snapshot
+├── curriculum/          # Authored subjects and concepts (JSON)
+├── tests/               # 370 tests, run in UTC-3 on purpose
 ├── frontend/            # React application
 │   ├── src/pages/       # Route components
 │   └── src/components/  # Shared UI
-└── docs/               # Additional documentation
+└── docs/                # PRDs, architecture, execution plan
 ```
 
 ### Environment Variables
@@ -193,9 +264,34 @@ For production (Vercel):
   aggregate query and never blocks a request; publishing forces the instance
   that served the publish to reload immediately.
 
+Spending and kill switches, all optional:
+
+- `LLM_DAILY_TOKEN_BUDGET` - Ceiling on model tokens over a rolling 24 hours,
+  counted in the database because serverless has no shared memory. Unset means
+  no ceiling, which production warns about once.
+- `LLM_ENABLED=false` - Stops all generation, for when the answer to a runaway
+  bill is "stop".
+- `DEMO_MODE_ENABLED=false` - Closes the anonymous demo endpoint on its own,
+  without taking the tutor away from the people actually testing.
+
+Running as a container (`Dockerfile` + `server/`), `JWT_SECRET` is required and
+`TURSO_DATABASE_URL` is required in production — the server reports every
+missing variable at once and refuses to boot, because a database defaulting to
+a file *inside* the container works until the first redeploy takes every
+account with it. `HEALTHCHECK` reads `/api/health/schema`, which answers 503
+while a migration is unfinished.
+
 ### Contributing
 
-See [ROADMAP.md](./ROADMAP.md) for the phased feature plan and [TODO.md](./TODO.md) for near-term improvements and known rough edges. Pull requests welcome!
+Start with [docs/PRD-v3-motor-de-intervencao.md](./docs/PRD-v3-motor-de-intervencao.md)
+for where the architecture is going and the ordered PR queue, and
+[docs/PLANO-DE-EXECUCAO.md](./docs/PLANO-DE-EXECUCAO.md) for what is done, what
+is open, and what turned out to be wrong along the way. Both are in Portuguese.
+[ROADMAP.md](./ROADMAP.md) and [TODO.md](./TODO.md) predate them and are kept
+for history.
+
+Pull requests welcome. The one convention worth knowing: a change is not done
+until something would fail if it broke.
 
 ---
 

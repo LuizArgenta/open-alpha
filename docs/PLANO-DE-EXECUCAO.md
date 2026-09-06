@@ -4,7 +4,9 @@ Quadro de acompanhamento do que falta para o Open Alpha ser usável de verdade p
 
 **Como manter:** marque a caixa quando o PR for **mergeado**, não quando for aberto, e anote o número do PR ao lado. Se um item se revelar desnecessário ou mudar de forma, edite a linha e diga por quê — um item riscado sem explicação vira dúvida daqui a três meses.
 
-Documentos relacionados: [PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md) · [PRD v2 — evidência, autoria e motivação](./PRD-plataforma-de-aprendizagem.md) · [Plano de deploy para teste](./PLANO-DEPLOY-TESTE.md)
+Documentos relacionados: [**PRD v3 — motor de intervenção**](./PRD-v3-motor-de-intervencao.md) · [PRD v1 — motor adaptativo](./PRD-adaptive-learning-engine.md) · [PRD v2 — evidência, autoria e motivação](./PRD-plataforma-de-aprendizagem.md) · [Plano de deploy para teste](./PLANO-DEPLOY-TESTE.md)
+
+> **Este plano continua válido como registro do que foi feito e como lista dos itens de integridade, segurança e LGPD ainda abertos.** A ordem do que vem a seguir passou a ser a da [fila de ondas do PRD v3](./PRD-v3-motor-de-intervencao.md#10-fila-de-prs), que reinterpreta os itens 19 a 24 dentro do laço evidência → decisão → intervenção → resultado. Os itens deste plano não foram renumerados: quando um deles é absorvido por uma onda, a linha diz qual.
 
 ---
 
@@ -89,11 +91,11 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
 ## Marco 2 — Tutor local confiável
 
 - [x] **19. Banco de itens** *(G)* — pool por habilidade em vez de 5 questões fixas, com dificuldade, distratores ligados a erros conhecidos e versão do item registrada em cada tentativa. **Destrava 20, 21 e 23.** **[PR #32](https://github.com/LuizArgenta/open-alpha/pull/32) mesclado.** Chegou fora da ordem desta lista: a sequência dizia "só então 19 em diante" e o trabalho aconteceu antes. Registrado assim em vez de reescrever a história.
-- [ ] **20. Seleção de itens** *(M)* — não repetir item recente, limitar exposição, sortear por dificuldade. Depende do 19. Desenho detalhado em [Desenho do item 20](./DESENHO-ITEM-20-selecao-de-itens.md). **Alerta de precedência:** o pool mínimo hoje é 5 e o sorteio pede 5 — com pool de exatamente 5 não existe escolha nenhuma, e as três restrições ficam insatisfazíveis por construção. Item 20 sem autoria de itens é código sem efeito.
-- [ ] **21. Nivelamento adaptativo** *(G)* — próxima questão escolhida pelas anteriores, regra estatística de parada, intervalo de confiança, retomada em outro dia. Depende do 19.
+- [ ] **20. Seleção de itens** *(M)* — não repetir item recente, limitar exposição, sortear por dificuldade. Depende do 19. Desenho detalhado em [Desenho do item 20](./DESENHO-ITEM-20-selecao-de-itens.md). **Alerta de precedência:** o pool mínimo hoje é 5 e o sorteio pede 5 — com pool de exatamente 5 não existe escolha nenhuma, e as três restrições ficam insatisfazíveis por construção. Item 20 sem autoria de itens é código sem efeito. → **onda 1 do v3** (a seleção passa a escolher uma *intervenção*, não só um item; e depende de autoria, hoje em 6%).
+- [ ] **21. Nivelamento adaptativo** *(G)* — próxima questão escolhida pelas anteriores, regra estatística de parada, intervalo de confiança, retomada em outro dia. Depende do 19. → **onda 2 do v3**, junto do benchmark: as duas medem com instrumento independente.
 - [ ] **22. Geração de lições em lote para árvores novas** *(M)* — item C5 do PRD v2, não entregue. ⚠️ **Bloqueado, não apenas "não verificável":** sem credenciais ATXP não dá para implementar nem testar. Ou alguém consegue a credencial, ou o item sai da fila e volta quando houver — deixá-lo listado como se fosse executável distorce todo cálculo de quanto falta.
-- [ ] **23. Modelo probabilístico de domínio** *(G)* — BKT ou Elo educacional, com incerteza e decaimento. ⚠️ **Adiar até haver dados reais:** calibrar sem alunos é ajustar parâmetros no vácuo.
-- [ ] **24. Planejador diário de atividades** *(G)* — fila misturando novidade, revisão e remediação. Só vale a pena depois do 23.
+- [ ] **23. Modelo probabilístico de domínio** *(G)* — BKT ou Elo educacional, com incerteza e decaimento. ⚠️ **Adiar até haver dados reais:** calibrar sem alunos é ajustar parâmetros no vácuo. → **onda 2/3 do v3**. Continua certo adiar; o `mastery_confidence` fixo em 1.0 é o campo à espera dele.
+- [ ] **24. Planejador diário de atividades** *(G)* — fila misturando novidade, revisão e remediação. Só vale a pena depois do 23. → **onda 1 do v3**: é o `nextAction` aplicado ao dia inteiro.
 
 ## Marco 3 — Operação com vários alunos
 
@@ -102,18 +104,18 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
   - [ ] **Retenção por categoria**, **exportação** e **exclusão** — continuam pendentes, e o aviso admite isso em vez de omitir. As três precisam existir antes de qualquer uso por quem não seja adulto consentindo.
   - [ ] **Linguagem infantil** — o aviso atual é para adulto. A versão para criança é outra escrita, não uma tradução.
   - [ ] **RIPD** — fora de PR, depende da revisão jurídica.
-- [ ] **26. Log de auditoria append-only** *(M)* — logins, mudanças de papel, publicações e acessos administrativos a dados infantis.
-- [ ] **27. Console de Guide** *(G)* — fila de intervenções priorizadas, histórico, notas privadas, acordos com o aluno, separação entre observação e inferência algorítmica.
+- [ ] **26. Log de auditoria append-only** *(M)* — logins, mudanças de papel, publicações e acessos administrativos a dados infantis. → **onda 0.2 do v3**: o servidor escrevendo eventos é metade deste item.
+- [ ] **27. Console de Guide** *(G)* — fila de intervenções priorizadas, histórico, notas privadas, acordos com o aluno, separação entre observação e inferência algorítmica. → **onda 3 do v3** (fila de intervenções do professor). Depende de 0.1.
 - [ ] **28. Turmas, grupos e matrículas** *(M)* — uma escola não é um conjunto de famílias avulsas.
 - [ ] **29. Painel do responsável completo** *(M)* — metas, limites de uso, exportação, controle de compartilhamento.
-- [ ] **30. Telemetria e observabilidade** *(M)* — schema único de eventos, painel de saúde, alerta de backup vencido.
+- [ ] **30. Telemetria e observabilidade** *(M)* — schema único de eventos, painel de saúde, alerta de backup vencido. → **ondas 0.2 e 1.2 do v3** (contrato canônico de evento).
 - [x] **31. Backup e restauração testados** *(M)* — [PR #42](https://github.com/LuizArgenta/open-alpha/pull/42). `npm run backup` e `npm run restore`, sobre `VACUUM INTO` — cópia consistente enquanto outras conexões leem, que `cp` não dá. **A metade que costuma faltar é a que este item pedia:** todo snapshot é *aberto e inspecionado* antes do comando dizer que deu certo, e o restore confere o arquivo **antes** de mexer em qualquer coisa; um restore que instala arquivo ilegível transforma uma queda recuperável em irrecuperável. O banco substituído é renomeado, não apagado — restaurar é quando menos se pode pagar um segundo erro. Recusa banco remoto em vez de fingir: um Turso remoto não é nosso para copiar com consistência, e ele tem backup próprio. 14 testes, incluindo o ciclo perda→restauração; verificado também pelos comandos reais contra o schema de verdade, não só pela biblioteca.
 
 ## Marco 4 — Plataforma equivalente
 
 - [ ] **32. API versionada, OpenAPI, erros padronizados** *(M)* — o VISION.md promete "API-first" desde o início.
 - [ ] **33. Distribuição local** *(G)* — Docker reproduzível, modo offline, LLM local por API compatível, chave de bloqueio de tráfego externo. **Antecipar para antes do piloto local**, junto do item 31. **Primeira metade feita** em [PR #41](https://github.com/LuizArgenta/open-alpha/pull/41): `Dockerfile`, servidor que roda os handlers de `api/` fora da Vercel, SQLite em volume, validação de ambiente no boot. Falta modo offline e LLM local — ver [plano de deploy](./PLANO-DEPLOY-TESTE.md).
-- [ ] **34. Padrões 1EdTech** *(G)* — OneRoster, CASE, QTI, Caliper.
+- [ ] **34. Padrões 1EdTech** *(G)* — OneRoster, CASE, QTI, Caliper. → **onda 4 do v3**, e só com instituição que justifique.
 - [ ] **35. Aplicativos por matéria** *(XG)* — editor matemático com rascunho e passos, leitor com fluência, editor de texto com rubricas, simulações. **É aqui que mora a diferença real para a Alpha, e cada matéria é praticamente um produto.**
 
 ---
