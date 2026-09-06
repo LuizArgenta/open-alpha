@@ -1,4 +1,4 @@
-import { type SqlStatement, executeSql, executeTransaction } from '../../_lib/db.js';
+import { type SqlStatement, executeSql, withTransaction } from '../../_lib/db.js';
 import { forbidden, getAuthFromRequest, unauthorized } from '../../_lib/auth.js';
 import {
   MASTERY_THRESHOLD,
@@ -225,12 +225,9 @@ export async function POST(request: Request) {
           }
         : await buildRemediation(auth.userId, subject, conceptId);
 
-    const writes: SqlStatement[] = [
-      {
-        sql: `UPDATE assessment_attempts SET score = $1, finished_at = datetime('now') WHERE id = $2`,
-        params: [score, attemptId],
-      },
-    ];
+    // The attempt's own finalisation is not in this list: it is the guard that
+    // decides whether the list runs at all, below.
+    const writes: SqlStatement[] = [];
 
     if (hasProgress) {
       // The WHERE clause's placeholder numbers depend on how many the SET
@@ -260,8 +257,8 @@ export async function POST(request: Request) {
 
     if (xp.amount !== 0) {
       writes.push({
-        sql: 'INSERT INTO xp_awards (student_id, subject, concept_id, amount, reason) VALUES ($1, $2, $3, $4, $5)',
-        params: [auth.userId, subject, conceptId, xp.amount, xp.reason],
+        sql: 'INSERT INTO xp_awards (student_id, subject, concept_id, attempt_id, amount, reason) VALUES ($1, $2, $3, $4, $5, $6)',
+        params: [auth.userId, subject, conceptId, attemptId, xp.amount, xp.reason],
       });
     }
 
@@ -321,7 +318,32 @@ export async function POST(request: Request) {
       );
     }
 
-    await executeTransaction(writes);
+    // The check at the top of this handler read `finished_at` before any of
+    // the work above; a second submission of the same attempt can pass it too,
+    // and both would then write — double XP, `attempts` counted twice, two
+    // sets of decisions for one piece of evidence. Claiming the attempt is
+    // therefore the first statement inside the transaction, conditioned on it
+    // still being open, so exactly one submission proceeds.
+    const finalised = await withTransaction(async scope => {
+      const claimed = await scope.run<{ id: number }>(
+        `UPDATE assessment_attempts SET score = $1, finished_at = datetime('now')
+         WHERE id = $2 AND finished_at IS NULL RETURNING id`,
+        [score, attemptId]
+      );
+
+      // libsql reports rowsAffected as 0 for an UPDATE ... RETURNING, so
+      // whether the row was claimed has to come from the returned rows.
+      if (claimed.rows.length === 0) return false;
+
+      for (const write of writes) {
+        await scope.run(write.sql, write.params);
+      }
+      return true;
+    });
+
+    if (!finalised) {
+      return Response.json({ error: 'Attempt already finished' }, { status: 409 });
+    }
 
     if (passed) {
       return Response.json({
