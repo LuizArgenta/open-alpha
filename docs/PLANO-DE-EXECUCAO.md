@@ -95,7 +95,7 @@ Nada aqui é opcional antes de colocar um aluno real no sistema.
 - [ ] **28. Turmas, grupos e matrículas** *(M)* — uma escola não é um conjunto de famílias avulsas.
 - [ ] **29. Painel do responsável completo** *(M)* — metas, limites de uso, exportação, controle de compartilhamento.
 - [ ] **30. Telemetria e observabilidade** *(M)* — schema único de eventos, painel de saúde, alerta de backup vencido.
-- [ ] **31. Backup e restauração testados** *(M)* — inclui teste de recuperação, não só de geração. **Antecipar para antes do piloto local** (ver Sequência recomendada), junto do item 33 — não é algo que se instala depois que já há aluno usando o sistema.
+- [x] **31. Backup e restauração testados** *(M)* — [PR #42](https://github.com/LuizArgenta/open-alpha/pull/42). `npm run backup` e `npm run restore`, sobre `VACUUM INTO` — cópia consistente enquanto outras conexões leem, que `cp` não dá. **A metade que costuma faltar é a que este item pedia:** todo snapshot é *aberto e inspecionado* antes do comando dizer que deu certo, e o restore confere o arquivo **antes** de mexer em qualquer coisa; um restore que instala arquivo ilegível transforma uma queda recuperável em irrecuperável. O banco substituído é renomeado, não apagado — restaurar é quando menos se pode pagar um segundo erro. Recusa banco remoto em vez de fingir: um Turso remoto não é nosso para copiar com consistência, e ele tem backup próprio. 14 testes, incluindo o ciclo perda→restauração; verificado também pelos comandos reais contra o schema de verdade, não só pela biblioteca.
 
 ## Marco 4 — Plataforma equivalente
 
@@ -131,7 +131,7 @@ Precisam de alguém que não é o time de engenharia:
    8. **12** — migrações versionadas, consolidando as quatro que existiam. ✅ PR #37. **Fecha a metade de integridade do Marco 1.**
 3. **Depois, segurança de custo baixo e risco alto:** 17 (✅ PR #28) → 18 (parcial, PR #38 — o resto é configuração do repositório) → 16 (✅ PR #39) → 13.
 4. **Sessão:** 14, depois **isolado** o 15 (cookie HttpOnly + CSRF), por tocar toda chamada autenticada.
-5. **Antes do piloto local, não depois:** 33 (distribuição local reproduzível) e 31 (backup e restauração testados) — instalar isso depois que já há aluno usando o sistema é tarde demais.
+5. **Antes do piloto local, não depois:** 33 (distribuição local reproduzível — primeira metade no PR #41) e 31 (✅ PR #42) — instalar isso depois que já há aluno usando o sistema é tarde demais.
 6. **LGPD (25) não espera** — corre em paralelo às entregas técnicas acima, dividida em pedaços pequenos; a revisão jurídica em si segue fora de PR.
 7. **Barato e fora de ordem, mas com o maior retorno pedagógico por linha:** ligar `distractor_error_code` ao diagnóstico (ver "O que apareceu no caminho"). Depende só do #32, não dos itens 9 a 12.
 8. **Só então** 20, 21, 23, 24 (seleção e algoritmos adaptativos) — e o 20 só rende depois de haver pool de itens de verdade, o que é autoria, não código.
@@ -151,7 +151,7 @@ Chamar isto de substituto local acadêmico exige, da auditoria original e da com
 - [ ] Atividades escolhidas por domínio e incerteza
 - [ ] Funciona sem dependência obrigatória de nuvem *(item 33)*
 - [ ] Responsáveis podem supervisionar, contestar e excluir dados
-- [ ] Backup e restauração testados *(item 31, antes do piloto)*
+- [x] Backup e restauração testados *(item 31, PR #42 — geração e recuperação)*
 - [ ] Auditoria e resposta a incidentes *(item 26)*
 - [x] Autorização verificada em todo endpoint relevante *(item 16, PR #39 — varredura não achou falha; o que faltava era o teste que prova)*
 - [ ] CI, análise de dependências e proteção de segredos ativos *(item 18)*
