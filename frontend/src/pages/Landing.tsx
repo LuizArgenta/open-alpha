@@ -823,6 +823,8 @@ export default function Landing() {
             <a href="/api/curriculum/graph" style={{ color: 'var(--primary)' }}>API</a>
             {' · '}
             <a href="https://github.com/open-alpha/open-alpha" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)' }}>GitHub</a>
+            {' · '}
+            <Link to="/data" style={{ color: 'var(--primary)' }}>Your data</Link>
           </p>
         </div>
       </footer>

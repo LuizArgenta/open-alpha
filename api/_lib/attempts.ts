@@ -13,7 +13,7 @@
  * the attempt as evidence, and a new attempt costs a click.
  */
 
-import { executeSql } from './db.js';
+import { executeSql, executeTransaction } from './db.js';
 
 export const ATTEMPT_LIFETIME_MINUTES = 120;
 
@@ -44,12 +44,19 @@ export async function expireStaleAttempts(studentId: number): Promise<number> {
  * request was refused.
  */
 export async function expireAttempt(attemptId: number): Promise<void> {
-  await executeSql(
-    `UPDATE assessment_attempts
-     SET expired_at = datetime('now'), finished_at = datetime('now')
-     WHERE id = $1 AND finished_at IS NULL`,
-    [attemptId]
-  );
+  // Queued rather than issued bare, for the same reason the answer insert is:
+  // a lone write racing another request's write transaction gets SQLITE_BUSY,
+  // and the student sees "something broke" for an attempt that merely timed
+  // out. executeTransaction runs through the write queue, so in one process
+  // the two take turns instead of colliding.
+  await executeTransaction([
+    {
+      sql: `UPDATE assessment_attempts
+            SET expired_at = datetime('now'), finished_at = datetime('now')
+            WHERE id = $1 AND finished_at IS NULL`,
+      params: [attemptId],
+    },
+  ]);
 }
 
 /** 410: the attempt existed and is gone, which is exactly what happened. */

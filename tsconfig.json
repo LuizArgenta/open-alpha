@@ -21,6 +21,7 @@
   "include": [
     "api/**/*.ts",
     "server/**/*.ts",
+    "scripts/**/*.ts",
     "tests/**/*.ts",
     "vitest.config.ts"
   ],
