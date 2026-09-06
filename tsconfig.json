@@ -20,13 +20,13 @@
   },
   "include": [
     "api/**/*.ts",
+    "server/**/*.ts",
     "scripts/**/*.ts",
     "tests/**/*.ts",
     "vitest.config.ts"
   ],
   "exclude": [
     "node_modules",
-    "frontend",
-    "backend"
+    "frontend"
   ]
 }
