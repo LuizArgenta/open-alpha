@@ -433,11 +433,18 @@ function countConcepts(loaded: Subject[]): number {
 
 /**
  * Set when serving the files is not acceptable — a school in operation would
- * rather be down than teach from a curriculum nobody chose. Off by default so
- * a fresh install and the test suite still boot.
+ * rather be down than teach from a curriculum nobody chose.
+ *
+ * On by default in production, off everywhere else so a fresh install and the
+ * test suite still boot. It used to be off everywhere, which meant the one
+ * deployment that most needs the guarantee was the one where forgetting a
+ * variable silently taught from the seed files, with a warning only in the
+ * log. Opting *out* in production stays possible and now has to be deliberate.
  */
 function databaseIsRequired(): boolean {
-  return process.env.CURRICULUM_REQUIRE_DATABASE === 'true';
+  const configured = process.env.CURRICULUM_REQUIRE_DATABASE;
+  if (configured !== undefined) return configured === 'true';
+  return process.env.NODE_ENV === 'production';
 }
 
 export class CurriculumUnavailableError extends Error {

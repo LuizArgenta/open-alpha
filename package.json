@@ -5,19 +5,18 @@
   "type": "module",
   "description": "AI-powered K-12 learning platform",
   "workspaces": [
-    "backend",
     "frontend"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "npm run dev --workspace=backend",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:frontend\"",
     "dev:frontend": "npm run dev --workspace=frontend",
-    "build": "npm run build --workspaces",
+    "build": "npm run build --workspace=frontend",
     "build:vercel": "cd frontend && npm run build",
-    "db:setup": "npm run db:setup --workspace=backend",
     "lint": "npm run lint --workspaces",
     "test": "vitest run",
     "test:watch": "vitest",
+    "start": "tsx server/index.ts",
+    "dev:server": "tsx watch server/index.ts",
     "backup": "tsx scripts/backup.ts",
     "restore": "tsx scripts/restore.ts"
   },
@@ -25,7 +24,8 @@
     "@libsql/client": "^0.14.0",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
-    "openai": "^4.77.0"
+    "openai": "^4.77.0",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

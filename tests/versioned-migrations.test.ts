@@ -131,8 +131,19 @@ describe('GET /api/health/schema', () => {
     await executeSql('DROP VIEW xp_awards');
   });
 
-  it('refuses an unauthenticated caller', async () => {
-    expect((await schemaHealth(get())).status).toBe(401);
+  /**
+   * This used to assert 401, which was wrong and quietly disabled the
+   * container's healthcheck: that probe carries no credentials and reads the
+   * status code, so it saw 401, decided "not 503, therefore up", and passed on
+   * every instance — including one whose migration had failed, the single case
+   * it exists to catch. The verdict is public now; what is withheld from an
+   * anonymous caller is the diagnosis, asserted just below and in
+   * tests/health-endpoint.test.ts.
+   */
+  it('gives an unauthenticated caller the verdict without the diagnosis', async () => {
+    const response = await schemaHealth(get());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
   });
 
   it('keeps the underlying error for staff only', async () => {
