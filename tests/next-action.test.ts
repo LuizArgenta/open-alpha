@@ -161,6 +161,19 @@ describe('what to do after failing', () => {
 });
 
 describe('the policy that chose it', () => {
+  /**
+   * The version exists so that decisions made under different rules can be
+   * told apart. That only works if it moves when the rules do — and the first
+   * time the rules changed, it did not: fixing the rollback inference made
+   * identical progress produce a different action under the same version 1.
+   */
+  it('moved when the selection rule changed', () => {
+    // Not an assertion about a particular number, which would be a test of a
+    // constant against itself. It is that the rule change shipped in #60 is on
+    // the far side of a version boundary from the contract that preceded it.
+    expect(POLICY_VERSION).toBeGreaterThan(1);
+  });
+
   it('is recorded with the decision, not only returned', async () => {
     await takeQuiz(token, 'math', DECIMALS, 1, 30_000);
 
