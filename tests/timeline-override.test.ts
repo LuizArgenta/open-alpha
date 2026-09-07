@@ -270,3 +270,76 @@ describe('human override', () => {
     expect(status).toBe(404);
   });
 });
+
+/**
+ * Item 1.5, and the first time an adult can see the engine's own bet.
+ *
+ * The prediction and the verdict have existed since 1.3 and lived only in the
+ * database. A parent asking "what is it doing about this?" had no answer, and
+ * a system that judges itself in private is not accountable to anyone —
+ * which is most of the reason the judgement is worth recording at all.
+ */
+describe('what the engine offered, and whether it worked', () => {
+  const DECIMALS = 'math-decimals';
+
+  async function ageOpenRuns(seconds = 60) {
+    await executeSql(
+      `UPDATE intervention_runs SET started_at = datetime(started_at, $1) WHERE completed_at IS NULL`,
+      [`-${seconds} seconds`]
+    );
+  }
+
+  it('shows the offer with what it expected to achieve', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+
+    const { body } = await readTimeline();
+    const started = body.events.find(
+      (event: any) => event.type === 'intervention' && event.phase === 'started'
+    );
+
+    expect(started).toBeDefined();
+    // The bet, in the parent's view: where the child was, and where this was
+    // supposed to get them.
+    expect(started.expected).toEqual({ baseline: 20, target: 80 });
+    expect(started.conceptName).toBeTruthy();
+    expect(started.outcome).toBeNull();
+  });
+
+  it('adds a second entry when it concludes, rather than rewriting the first', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+    await ageOpenRuns();
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 5, 30_000);
+
+    const { body } = await readTimeline();
+    const entries = body.events.filter((event: any) => event.type === 'intervention');
+
+    // Two moments, two rows. Collapsing them into one verdict would hide the
+    // gap between being offered something and finding out whether it helped,
+    // which is the part being asked about.
+    expect(entries.map((event: any) => event.phase).sort()).toEqual(['completed', 'started']);
+    const completed = entries.find((event: any) => event.phase === 'completed');
+    expect(completed.outcome).toBe('met');
+    expect(completed.observed).toBe(100);
+    expect(entries.every((event: any) => event.runId === entries[0].runId)).toBe(true);
+  });
+
+  it('reports a verdict it could not reach as exactly that', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+    await ageOpenRuns();
+    // Rushed: says nothing about whether the offer helped.
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 300);
+
+    const { body } = await readTimeline();
+    const completed = body.events.find(
+      (event: any) => event.type === 'intervention' && event.phase === 'completed'
+    );
+    expect(completed.outcome).toBe('inconclusive');
+  });
+
+  it('stays a parent-only view', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+
+    const stranger = await getTimeline(timelineRequest(childId, strangerToken));
+    expect(stranger.status).toBe(403);
+  });
+});
