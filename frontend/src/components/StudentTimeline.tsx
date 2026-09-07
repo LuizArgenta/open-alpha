@@ -41,6 +41,8 @@ interface InterventionEvent {
   subject: string;
   conceptId: string;
   conceptName: string;
+  targetConceptId: string;
+  targetConceptName: string;
   runId: string;
   interventionKey: string;
   interventionType: string;
@@ -137,7 +139,9 @@ export default function StudentTimeline({ childId }: { childId: number }) {
                           undefined,
                           event.interventionType
                         ),
-                        concept: event.conceptName,
+                        // What they were sent to do — which for a prerequisite
+                        // review is not the concept they were measured on.
+                        concept: event.targetConceptName,
                       }) + (event.expected
                         ? ` · ${t('timeline.intervention.expected', {
                             baseline: event.expected.baseline,

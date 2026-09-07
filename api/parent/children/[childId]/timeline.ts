@@ -45,6 +45,7 @@ interface InterventionRunRow {
   source: string;
   subject: string;
   concept_id: string;
+  target_concept_id: string | null;
   reason: string;
   expected_outcome: string;
   started_at: string;
@@ -93,8 +94,12 @@ type TimelineEvent =
       /** `started` and `completed` are separate moments and separate rows. */
       phase: 'started' | 'completed';
       subject: string;
+      /** The concept the run is judged on. */
       conceptId: string;
       conceptName: string;
+      /** Where the student was actually sent, which is not always the same. */
+      targetConceptId: string;
+      targetConceptName: string;
       runId: string;
       interventionKey: string;
       interventionType: string;
@@ -157,11 +162,15 @@ export async function GET(request: Request) {
 
     const runs = await executeSql<InterventionRunRow>(
       `SELECT r.run_id, i.key AS intervention_key, i.type AS intervention_type, i.source,
-              r.subject, r.concept_id, r.reason, r.expected_outcome,
+              r.subject, r.concept_id, r.target_concept_id, r.reason, r.expected_outcome,
               r.started_at, r.completed_at, r.outcome, r.evidence_summary
        FROM intervention_runs r JOIN interventions i ON i.id = r.intervention_id
        WHERE r.student_id = $1
-       ORDER BY r.started_at DESC, r.id DESC
+       -- By the run's most recent moment, not by when it started. A run opened
+       -- months ago and concluded this morning produces one of the newest
+       -- entries on this timeline, and ordering by started_at alone would drop
+       -- it below the limit and lose that entry entirely.
+       ORDER BY MAX(r.started_at, COALESCE(r.completed_at, r.started_at)) DESC, r.id DESC
        LIMIT $2`,
       [access.childId, limit]
     );
@@ -199,6 +208,11 @@ export async function GET(request: Request) {
           subject: row.subject,
           conceptId: row.concept_id,
           conceptName: conceptName(row.subject, row.concept_id) ?? row.concept_id,
+          // Null means the offer and the measurement are the same concept.
+          targetConceptId: row.target_concept_id ?? row.concept_id,
+          targetConceptName:
+            conceptName(row.subject, row.target_concept_id ?? row.concept_id)
+            ?? (row.target_concept_id ?? row.concept_id),
           runId: row.run_id,
           interventionKey: row.intervention_key,
           interventionType: row.intervention_type,
