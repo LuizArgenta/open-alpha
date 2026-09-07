@@ -1,6 +1,6 @@
 import { executeSql } from '../../_lib/db.js';
 import { getAuthFromRequest, unauthorized } from '../../_lib/auth.js';
-import { getNextConcept } from '../../_lib/curriculum.js';
+import { selectNextConcept } from '../../_lib/curriculum.js';
 import { recordDecision } from '../../_lib/decisions.js';
 import { POLICY_VERSION, actionForNextConcept } from '../../_lib/next-action.js';
 
@@ -45,14 +45,24 @@ export async function GET(request: Request) {
       masteryScore: row.mastery_score,
       attempts: row.attempts,
     }));
-    const nextConcept = getNextConcept(subject, progress, userResult.rows[0].grade_level);
+    const selection = selectNextConcept(subject, progress, userResult.rows[0].grade_level);
+    const nextConcept = selection?.concept;
 
-    // Whether the engine moved forward or stepped back is the single most
-    // useful thing an adult can know about this decision — and under the
-    // action contract they are different instructions, not one "concept".
-    const record = nextConcept ? progress.find(p => p.conceptId === nextConcept.id) : undefined;
-    const steppedBack = Boolean(nextConcept) && !record && progress.length > 0;
-    const nextAction = nextConcept ? actionForNextConcept(nextConcept, steppedBack) : null;
+    /**
+     * Whether the engine moved forward or stepped back is the single most
+     * useful thing an adult can know about this decision — and under the
+     * action contract they are different instructions, not one "concept".
+     *
+     * The selector is asked rather than guessed at. Inferring it from "no
+     * progress row for this concept and progress elsewhere" is wrong in the
+     * ordinary case: a student who masters one concept moves to the next
+     * *unseen* one, which by definition has no row. Every normal advancement
+     * was labelled `prerequisite_gap`, and once 1.4 made the reason drive the
+     * action, mastering something told the learner to go back and review it.
+     */
+    const nextAction = selection
+      ? actionForNextConcept(selection.concept, selection.reason === 'prerequisite_gap')
+      : null;
 
     if (nextConcept && nextAction) {
       await recordDecision({
