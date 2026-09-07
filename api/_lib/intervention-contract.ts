@@ -136,7 +136,16 @@ export interface StartRun {
   interventionKey: string;
   studentId: number;
   subject: string;
+  /** Where the student is measured, before and after. */
   conceptId: string;
+  /**
+   * Where the student was actually sent, when that is somewhere else.
+   *
+   * A prerequisite review offers one concept and re-measures on another. A
+   * record that keeps only the measurement cannot say what was tried, which
+   * makes it useless for the comparison this table exists for.
+   */
+  targetConceptId?: string;
   /** Machine-readable grounds, stable enough to group and count on. */
   reason: string;
   /** The signals it was chosen from. */

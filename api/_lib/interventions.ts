@@ -87,8 +87,8 @@ export function startRunStatement(
   const statement: SqlStatement = {
     sql: `INSERT INTO intervention_runs
             (run_id, intervention_id, student_id, decision_id, subject, concept_id,
-             reason, evidence, expected_outcome)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+             target_concept_id, reason, evidence, expected_outcome)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     params: [
       runId,
       interventionId,
@@ -96,6 +96,9 @@ export function startRunStatement(
       run.decisionId ?? null,
       run.subject,
       run.conceptId,
+      // Null when the offer and the measurement are the same concept, which
+      // is most of the time. Only a prerequisite review splits them.
+      run.targetConceptId && run.targetConceptId !== run.conceptId ? run.targetConceptId : null,
       run.reason,
       JSON.stringify(run.evidence),
       JSON.stringify(run.expectedOutcome),

@@ -36,8 +36,14 @@ function overrideRequest(target: number, token: string, body: Record<string, unk
   });
 }
 
-async function readTimeline(target = childId, token = parentToken) {
-  const response = await getTimeline(timelineRequest(target, token));
+async function readTimeline(target = childId, token = parentToken, limit?: number) {
+  const response = await getTimeline(
+    limit === undefined
+      ? timelineRequest(target, token)
+      : new Request(`https://test.local/api/parent/children/${target}/timeline?limit=${limit}`, {
+          headers: { authorization: `Bearer ${token}` },
+        })
+  );
   return { status: response.status, body: (await response.json()) as any };
 }
 
@@ -268,5 +274,151 @@ describe('human override', () => {
     });
 
     expect(status).toBe(404);
+  });
+});
+
+/**
+ * Item 1.5, and the first time an adult can see the engine's own bet.
+ *
+ * The prediction and the verdict have existed since 1.3 and lived only in the
+ * database. A parent asking "what is it doing about this?" had no answer, and
+ * a system that judges itself in private is not accountable to anyone —
+ * which is most of the reason the judgement is worth recording at all.
+ */
+describe('what the engine offered, and whether it worked', () => {
+  const DECIMALS = 'math-decimals';
+
+  async function ageOpenRuns(seconds = 60) {
+    await executeSql(
+      `UPDATE intervention_runs SET started_at = datetime(started_at, $1) WHERE completed_at IS NULL`,
+      [`-${seconds} seconds`]
+    );
+  }
+
+  it('shows the offer with what it expected to achieve', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+
+    const { body } = await readTimeline();
+    const started = body.events.find(
+      (event: any) => event.type === 'intervention' && event.phase === 'started'
+    );
+
+    expect(started).toBeDefined();
+    // The bet, in the parent's view: where the child was, and where this was
+    // supposed to get them.
+    expect(started.expected).toEqual({ baseline: 20, target: 80 });
+    expect(started.conceptName).toBeTruthy();
+    expect(started.outcome).toBeNull();
+  });
+
+  it('adds a second entry when it concludes, rather than rewriting the first', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+    await ageOpenRuns();
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 5, 30_000);
+
+    const { body } = await readTimeline();
+    const entries = body.events.filter((event: any) => event.type === 'intervention');
+
+    // Two moments, two rows. Collapsing them into one verdict would hide the
+    // gap between being offered something and finding out whether it helped,
+    // which is the part being asked about.
+    expect(entries.map((event: any) => event.phase).sort()).toEqual(['completed', 'started']);
+    const completed = entries.find((event: any) => event.phase === 'completed');
+    expect(completed.outcome).toBe('met');
+    expect(completed.observed).toBe(100);
+    expect(entries.every((event: any) => event.runId === entries[0].runId)).toBe(true);
+  });
+
+  it('reports a verdict it could not reach as exactly that', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+    await ageOpenRuns();
+    // Rushed: says nothing about whether the offer helped.
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 300);
+
+    const { body } = await readTimeline();
+    const completed = body.events.find(
+      (event: any) => event.type === 'intervention' && event.phase === 'completed'
+    );
+    expect(completed.outcome).toBe('inconclusive');
+  });
+
+  /**
+   * Being offered one concept and measured on another.
+   *
+   * A prerequisite review sends the student to division and re-measures them
+   * on fractions. The run recorded only the second, so the timeline named the
+   * concept the child had just failed for an intervention that never mentioned
+   * it — an adult reading "offered practice on Fractions" would have no way to
+   * know they had been sent somewhere else entirely.
+   */
+  it('names the concept the child was actually sent to', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+
+    const target = await executeSql<{ target_concept_id: string | null; concept_id: string }>(
+      'SELECT target_concept_id, concept_id FROM intervention_runs'
+    );
+    // The engine sent them to a prerequisite, so the two differ.
+    expect(target.rows[0].target_concept_id).not.toBeNull();
+    expect(target.rows[0].target_concept_id).not.toBe(target.rows[0].concept_id);
+
+    const { body } = await readTimeline();
+    const started = body.events.find(
+      (event: any) => event.type === 'intervention' && event.phase === 'started'
+    );
+
+    expect(started.targetConceptId).toBe(target.rows[0].target_concept_id);
+    // And the measured concept is still there: the score belongs to it.
+    expect(started.conceptId).toBe(DECIMALS);
+  });
+
+  /**
+   * A run opened long ago and concluded this morning is one of the newest
+   * things on this timeline. Ordering candidates by `started_at` alone drops
+   * it below the limit and loses the completion entirely — the timeline would
+   * be missing its most recent event while claiming to be chronological.
+   */
+  it('does not lose an old run that just concluded', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+    // Old enough to sit below newer activity, and inside the fourteen-day
+    // window, so it is still waiting on a result rather than abandoned.
+    await executeSql("UPDATE intervention_runs SET started_at = datetime('now', '-10 days')");
+
+    // Five runs started since. Under a limit of five, ordering candidates by
+    // started_at alone leaves the old one out of the query entirely — and with
+    // it the completion that is about to become one of the newest entries.
+    for (let index = 0; index < 5; index += 1) {
+      await executeSql(
+        `INSERT INTO intervention_runs
+           (run_id, intervention_id, student_id, subject, concept_id, reason,
+            evidence, expected_outcome, started_at, completed_at, outcome)
+         SELECT $1, id, $2, 'math', 'math-ratios', 'knowledge_gap', '{}',
+                json_object('baseline', 10, 'target', 80),
+                datetime('now', $3), datetime('now', $3), 'not_met'
+         FROM interventions WHERE key = 'engine.extra_practice'`,
+        [`filler-${index}`, childId, `-${index + 1} hours`]
+      );
+    }
+
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 5, 30_000);
+
+    // Attempts and decisions pushed back so the final chronological cut is not
+    // what decides this: the question under test is whether the *runs query*
+    // considered the old run at all.
+    await executeSql("UPDATE assessment_attempts SET started_at = datetime('now', '-2 days'), finished_at = datetime('now', '-2 days')");
+    await executeSql("UPDATE learning_decisions SET created_at = datetime('now', '-2 days')");
+
+    const { body } = await readTimeline(childId, parentToken, 5);
+    const completed = body.events.filter(
+      (event: any) => event.type === 'intervention' && event.phase === 'completed'
+    );
+
+    expect(completed.some((event: any) => event.outcome === 'met')).toBe(true);
+  });
+
+  it('stays a parent-only view', async () => {
+    await takeQuiz(childToken, SUBJECT, DECIMALS, 1, 30_000);
+
+    const stranger = await getTimeline(timelineRequest(childId, strangerToken));
+    expect(stranger.status).toBe(403);
   });
 });

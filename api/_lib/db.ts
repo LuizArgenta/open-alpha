@@ -611,6 +611,26 @@ async function migrateInterventions(): Promise<void> {
   }
 }
 
+/**
+ * What a run *offered*, as against what it is judged on.
+ *
+ * `review_prerequisites` sends the student to a different concept than the one
+ * they failed: they are offered division and re-measured on fractions. The run
+ * recorded only the second, so the timeline said "offered practice on
+ * Fractions" for an intervention that never mentioned fractions.
+ *
+ * Nullable, and null means "the same concept" — which is true of every run
+ * written before this column existed and of most written after it.
+ */
+async function migrateInterventionTarget(): Promise<void> {
+  const columns = await client.execute('PRAGMA table_info(intervention_runs)');
+  const existing = new Set(columns.rows.map(row => String(row.name)));
+
+  if (!existing.has('target_concept_id')) {
+    await client.execute('ALTER TABLE intervention_runs ADD COLUMN target_concept_id TEXT');
+  }
+}
+
 async function migrateLlmUsage(): Promise<void> {
   await client.execute(`CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -956,7 +976,14 @@ export async function initializeSchema(): Promise<void> {
       -- The decision that chose this, so a challenge to one reaches the other.
       decision_id INTEGER REFERENCES learning_decisions(id),
       subject TEXT NOT NULL,
+      -- The concept this run is *judged on*: where the student was measured
+      -- and where they will be measured again.
       concept_id TEXT NOT NULL,
+      -- The concept the student was actually sent to, when that differs.
+      -- Reviewing a prerequisite means being offered one concept and assessed
+      -- on another, and a record that keeps only the second cannot say what
+      -- was tried.
+      target_concept_id TEXT,
       reason TEXT NOT NULL,
       evidence TEXT NOT NULL DEFAULT '{}',
       -- Written before the result, which is the whole point: without a
@@ -1379,6 +1406,7 @@ export async function initializeSchema(): Promise<void> {
     { id: '008-learning-event-source', run: migrateLearningEventSource },
     { id: '009-learning-event-envelope', run: migrateLearningEventEnvelope },
     { id: '010-interventions', run: migrateInterventions },
+    { id: '011-intervention-target', run: migrateInterventionTarget },
   ]);
 }
 

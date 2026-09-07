@@ -515,6 +515,8 @@ export async function POST(request: Request) {
             studentId: auth.userId,
             subject,
             conceptId,
+            // Where they were sent, when the remediation names somewhere else.
+            targetConceptId: remediation?.conceptId,
             reason: diagnosis.pattern,
             evidence: {
               score,

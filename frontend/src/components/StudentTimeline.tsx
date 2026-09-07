@@ -26,7 +26,42 @@ interface DecisionEvent {
   reason: string;
 }
 
-type TimelineEvent = AttemptEvent | DecisionEvent;
+/**
+ * What the engine offered, and what it concluded about it.
+ *
+ * Two entries per run rather than one. The gap between "offered a review of
+ * equivalent fractions, expecting 80" and "concluded it did not work" is the
+ * part a parent asking "what is it doing about this?" is actually asking
+ * about, and one collapsed row with a verdict hides it.
+ */
+interface InterventionEvent {
+  type: 'intervention';
+  at: string;
+  phase: 'started' | 'completed';
+  subject: string;
+  conceptId: string;
+  conceptName: string;
+  targetConceptId: string;
+  targetConceptName: string;
+  runId: string;
+  interventionKey: string;
+  interventionType: string;
+  source: string;
+  reason: string;
+  expected: { baseline: number; target: number } | null;
+  outcome: string | null;
+  observed: number | null;
+}
+
+type TimelineEvent = AttemptEvent | DecisionEvent | InterventionEvent;
+
+/** Colour by verdict: a prediction that held reads differently from one that did not. */
+const OUTCOME_COLOR: Record<string, string> = {
+  met: 'var(--success)',
+  not_met: '#f59e0b',
+  inconclusive: 'var(--text-light)',
+  abandoned: 'var(--text-light)',
+};
 
 const KIND_COLOR: Record<string, string> = {
   next_concept: 'var(--primary)',
@@ -40,6 +75,16 @@ const KIND_COLOR: Record<string, string> = {
 function formatTime(at: string): string {
   const date = new Date(at.includes('T') ? at : at.replace(' ', 'T') + 'Z');
   return Number.isNaN(date.getTime()) ? at : date.toLocaleString();
+}
+
+function borderFor(event: TimelineEvent): string {
+  if (event.type === 'attempt') return 'var(--border)';
+  if (event.type === 'intervention') {
+    // An unfinished run is still waiting on an answer, and says so by being
+    // the same neutral colour as everything else in progress.
+    return event.outcome ? OUTCOME_COLOR[event.outcome] ?? 'var(--border)' : '#f59e0b';
+  }
+  return KIND_COLOR[event.kind] ?? 'var(--border)';
 }
 
 export default function StudentTimeline({ childId }: { childId: number }) {
@@ -81,14 +126,34 @@ export default function StudentTimeline({ childId }: { childId: number }) {
             <li
               key={`${event.type}-${index}`}
               style={{
-                borderLeft: `3px solid ${
-                  event.type === 'attempt' ? 'var(--border)' : KIND_COLOR[event.kind] ?? 'var(--border)'
-                }`,
+                borderLeft: `3px solid ${borderFor(event)}`,
                 paddingLeft: '0.75rem',
               }}
             >
               <div style={{ fontSize: '0.875rem' }}>
-                {event.type === 'attempt'
+                {event.type === 'intervention'
+                  ? event.phase === 'started'
+                    ? t('timeline.intervention.started', {
+                        what: serverText(
+                          `timeline.intervention.type.${event.interventionType}`,
+                          undefined,
+                          event.interventionType
+                        ),
+                        // What they were sent to do — which for a prerequisite
+                        // review is not the concept they were measured on.
+                        concept: event.targetConceptName,
+                      }) + (event.expected
+                        ? ` · ${t('timeline.intervention.expected', {
+                            baseline: event.expected.baseline,
+                            target: event.expected.target,
+                          })}`
+                        : '')
+                    : serverText(
+                        `timeline.intervention.outcome.${event.outcome}`,
+                        { concept: event.conceptName, observed: event.observed ?? '' },
+                        event.outcome ?? ''
+                      )
+                  : event.type === 'attempt'
                   ? `${t(
                       event.kind === 'placement' ? 'timeline.placementAttempt' : 'timeline.attempt',
                       {
@@ -106,6 +171,8 @@ export default function StudentTimeline({ childId }: { childId: number }) {
               <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
                 {formatTime(event.at)}
                 {event.type === 'decision' &&
+                  ` · ${serverText(`timeline.reason.${event.reason}`, undefined, event.reason)}`}
+                {event.type === 'intervention' && event.phase === 'started' &&
                   ` · ${serverText(`timeline.reason.${event.reason}`, undefined, event.reason)}`}
               </div>
             </li>
