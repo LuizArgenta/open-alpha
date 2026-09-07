@@ -631,6 +631,55 @@ async function migrateInterventionTarget(): Promise<void> {
   }
 }
 
+/**
+ * Provenance on anything a learner is served.
+ *
+ * Five columns rather than a JSON blob, because the question this exists to
+ * answer is a query: "everything we publish that came from outside, and under
+ * what licence". A blob makes that a table scan and a parse, and a licence
+ * audit is precisely the thing that must not be awkward.
+ *
+ * Prefixed `content_` because `interventions.source` already exists and means
+ * something else entirely — who delivers the intervention (engine, teacher,
+ * AI, external, peer), as against where its *content* came from. A teacher can
+ * deliver public-domain material; those are two facts, not one.
+ *
+ * Existing rows are backfilled to `original`, which is what they are: the
+ * seeded curriculum was written for this project. Backfilled rather than left
+ * null so the publish gate does not refuse the whole existing curriculum on
+ * the day it lands — a rule that immediately breaks everything is a rule that
+ * gets reverted rather than followed.
+ */
+async function migrateProvenance(): Promise<void> {
+  const PROVENANCE_COLUMNS = [
+    'content_source',
+    'content_source_url',
+    'content_source_version',
+    'content_license',
+    'content_attribution',
+  ];
+
+  for (const table of ['curriculum_concepts', 'interventions']) {
+    const columns = await client.execute(`PRAGMA table_info(${table})`);
+    const existing = new Set(columns.rows.map(row => String(row.name)));
+
+    for (const column of PROVENANCE_COLUMNS) {
+      if (!existing.has(column)) {
+        await client.execute(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+      }
+    }
+
+    await client.execute(
+      `UPDATE ${table} SET content_source = 'original' WHERE content_source IS NULL`
+    );
+  }
+
+  // The licence audit, made cheap.
+  await client.execute(
+    'CREATE INDEX IF NOT EXISTS curriculum_concepts_license ON curriculum_concepts(content_license)'
+  );
+}
+
 async function migrateLlmUsage(): Promise<void> {
   await client.execute(`CREATE TABLE IF NOT EXISTS llm_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -961,6 +1010,16 @@ export async function initializeSchema(): Promise<void> {
       source TEXT NOT NULL CHECK (source IN (${INTERVENTION_SOURCE_LIST})),
       -- Where the material lives, when it lives outside this database.
       content_ref TEXT,
+      -- Provenance. Prefixed because interventions.source already means
+      -- something else: who *delivers* the intervention, as against where its
+      -- content came from. Recorded at write time because it cannot be
+      -- recovered afterwards -- no migration recovers a licence nobody wrote
+      -- down. See provenance.ts, and the publish gate that reads these.
+      content_source TEXT,
+      content_source_url TEXT,
+      content_source_version TEXT,
+      content_license TEXT,
+      content_attribution TEXT,
       estimated_minutes INTEGER,
       version INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN (${INTERVENTION_STATUS_LIST})),
@@ -1066,6 +1125,16 @@ export async function initializeSchema(): Promise<void> {
       -- Hash of the published content, so an import that changes nothing does
       -- not bump the version a teacher reads as "this concept changed".
       content_hash TEXT,
+      -- Provenance. Prefixed because interventions.source already means
+      -- something else: who *delivers* the intervention, as against where its
+      -- content came from. Recorded at write time because it cannot be
+      -- recovered afterwards -- no migration recovers a licence nobody wrote
+      -- down. See provenance.ts, and the publish gate that reads these.
+      content_source TEXT,
+      content_source_url TEXT,
+      content_source_version TEXT,
+      content_license TEXT,
+      content_attribution TEXT,
       status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'in_review', 'published')),
       version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
@@ -1407,6 +1476,7 @@ export async function initializeSchema(): Promise<void> {
     { id: '009-learning-event-envelope', run: migrateLearningEventEnvelope },
     { id: '010-interventions', run: migrateInterventions },
     { id: '011-intervention-target', run: migrateInterventionTarget },
+    { id: '012-content-provenance', run: migrateProvenance },
   ]);
 }
 
