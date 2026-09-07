@@ -17,12 +17,26 @@ interface WorkedExample {
   answer: string;
 }
 
+/**
+ * The credit line for material that came from somewhere else.
+ *
+ * Shown to the learner rather than kept in an admin screen, because the
+ * obligation is to the person reading the lesson. Attribution only a staff
+ * member can see is not attribution — it is a record of having meant to.
+ */
+interface Attribution {
+  text: string;
+  license: string;
+  sourceUrl?: string;
+}
+
 interface LessonIntroProps {
   objective?: string;
   explanation: ConceptExplanation;
   alternateExplanations?: AlternateExplanation[];
   workedExamples?: WorkedExample[];
   whyItMatters?: string;
+  attribution?: Attribution;
   onStartChat: () => void;
 }
 
@@ -104,6 +118,7 @@ export default function LessonIntro({
   alternateExplanations,
   workedExamples,
   whyItMatters,
+  attribution,
   onStartChat,
 }: LessonIntroProps) {
   const [speaking, setSpeaking] = useState(false);
@@ -347,6 +362,32 @@ export default function LessonIntro({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {attribution && (
+        <div style={{
+          marginTop: '1rem',
+          paddingTop: '0.75rem',
+          borderTop: '1px solid var(--border)',
+          fontSize: '0.75rem',
+          color: 'var(--text-light)',
+          lineHeight: 1.5,
+        }}>
+          {attribution.sourceUrl ? (
+            <a
+              href={attribution.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'inherit' }}
+            >
+              {attribution.text}
+            </a>
+          ) : (
+            attribution.text
+          )}
+          {' · '}
+          {attribution.license}
         </div>
       )}
 

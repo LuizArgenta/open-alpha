@@ -86,6 +86,22 @@ export interface Concept {
   remediationPath?: RemediationPath;
   whyItMatters?: string;
   metadata?: ConceptMetadata;
+  /**
+   * Where this concept came from, when it came from outside.
+   *
+   * Carried onto the concept — rather than left in a column an admin screen
+   * could query — because the obligation is to the *learner*: attribution that
+   * only an administrator can see is not attribution. Present only for content
+   * that requires crediting, so the ordinary case stays untouched.
+   */
+  attribution?: ConceptAttribution;
+}
+
+export interface ConceptAttribution {
+  /** The credit line, as it must be shown. */
+  text: string;
+  license: string;
+  sourceUrl?: string;
 }
 
 export interface Subject {
@@ -172,6 +188,10 @@ interface ConceptRow {
   level: number;
   prerequisites: string;
   content: string;
+  content_source: string | null;
+  content_source_url: string | null;
+  content_license: string | null;
+  content_attribution: string | null;
 }
 
 interface SubjectRow {
@@ -202,7 +222,8 @@ export async function readCurriculumFromDatabase(): Promise<DatabaseCurriculum> 
   if (subjectRows.rows.length === 0) return { subjects: [], problems: [] };
 
   const conceptRows = await executeSql<ConceptRow>(
-    `SELECT subject_id, concept_id, name, description, level, prerequisites, content
+    `SELECT subject_id, concept_id, name, description, level, prerequisites, content,
+            content_source, content_source_url, content_license, content_attribution
      FROM curriculum_concepts WHERE status = 'published'
      ORDER BY subject_id, level, concept_id`
   );
@@ -224,6 +245,18 @@ export async function readCurriculumFromDatabase(): Promise<DatabaseCurriculum> 
       prerequisites: parsed.record.prerequisites,
       gradeLevel: row.level,
       ...(parsed.record.content as Partial<Concept>),
+      // Only when there is something to credit. Content written for this
+      // project needs no line, and adding an empty one everywhere would train
+      // readers to ignore the place credit appears.
+      ...(row.content_attribution && row.content_license
+        ? {
+            attribution: {
+              text: row.content_attribution,
+              license: row.content_license,
+              ...(row.content_source_url ? { sourceUrl: row.content_source_url } : {}),
+            },
+          }
+        : {}),
     };
     bySubject.set(row.subject_id, [...(bySubject.get(row.subject_id) ?? []), concept]);
   }

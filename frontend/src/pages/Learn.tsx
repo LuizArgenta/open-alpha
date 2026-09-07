@@ -37,6 +37,8 @@ interface Concept {
   alternateExplanations?: AlternateExplanation[];
   workedExamples?: WorkedExample[];
   whyItMatters?: string;
+  /** Set only for content that came from outside and has to be credited. */
+  attribution?: { text: string; license: string; sourceUrl?: string };
 }
 
 const TUTOR_LEVELS = [
@@ -218,6 +220,19 @@ export default function Learn() {
               alternateExplanations: data.lesson.alternateExplanations,
               workedExamples: data.lesson.workedExamples,
               whyItMatters: data.lesson.whyItMatters,
+              /**
+               * Credit only the material the credit is actually for.
+               *
+               * The concept may have been imported from a corpus while the
+               * lesson on screen was written by a model — the endpoint says
+               * which. Putting "Wikidata contributors, CC0" under text
+               * Wikidata never wrote is a false citation, and a false citation
+               * is worse than none: it makes every other one less believable.
+               *
+               * Generated content that *adapts* a source is item 1.8, and it
+               * will carry its own provenance rather than borrowing this one.
+               */
+              attribution: data.source === 'authored' ? selectedConcept.attribution : undefined,
             };
             setSelectedConcept(enriched);
             setConcepts(prev => prev.map(c => c.id === enriched.id ? enriched : c));
@@ -631,6 +646,7 @@ export default function Learn() {
                       alternateExplanations={selectedConcept.alternateExplanations}
                       workedExamples={selectedConcept.workedExamples}
                       whyItMatters={selectedConcept.whyItMatters}
+                      attribution={selectedConcept.attribution}
                       onStartChat={() => setShowIntro(false)}
                     />
                   ) : (
