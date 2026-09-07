@@ -72,10 +72,12 @@ describe('what to study next', () => {
   });
 
   it('distinguishes stepping back from moving on', async () => {
-    // Progress on a later concept only: the engine has to reach back past it.
+    // Three failures on the concept the engine had chosen. This is the one
+    // branch that actually reaches back — the grade-4 student was working on
+    // fractions and gets sent to division underneath it.
     await executeSql(
       `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at)
-       VALUES ($1, 'math', 'math-decimals', 20, 3, datetime('now'))`,
+       VALUES ($1, 'math', 'math-fractions-intro', 20, 3, datetime('now'))`,
       [studentId]
     );
 
@@ -83,8 +85,38 @@ describe('what to study next', () => {
 
     // Under the old contract both cases returned "a concept" and the reason
     // lived only in the decision log. They are different instructions.
+    expect(body.concept?.id).toBe('math-division');
     expect(body.nextAction?.type).toBe('review_prerequisite');
     expect(body.nextAction?.reason).toBe('prerequisite_gap');
+  });
+
+  /**
+   * The bug that made the reason worth getting from the selector rather than
+   * inferring it.
+   *
+   * A student who masters a concept is sent to the next *unseen* one, which by
+   * definition has no progress row. "No row for this concept, and progress
+   * elsewhere" therefore matched every ordinary advancement — so mastering
+   * something told the learner to go back and review it, and the decision log
+   * recorded `prerequisite_gap` for the most common move in the system.
+   */
+  it('calls mastering a concept and moving on exactly that', async () => {
+    await executeSql(
+      `INSERT INTO progress (student_id, subject, concept_id, mastery_score, attempts, last_attempt_at)
+       VALUES ($1, 'math', 'math-fractions-intro', 100, 1, datetime('now'))`,
+      [studentId]
+    );
+
+    const body = await nextFor('math');
+
+    expect(body.nextAction?.type).toBe('study_concept');
+    expect(body.nextAction?.reason).toBe('next_in_sequence');
+
+    const decision = await executeSql<{ reason: string }>(
+      `SELECT reason FROM learning_decisions WHERE student_id = $1 AND kind = 'next_concept'`,
+      [studentId]
+    );
+    expect(decision.rows[0].reason).toBe('next_in_sequence');
   });
 
   it('answers null rather than inventing an action', async () => {
