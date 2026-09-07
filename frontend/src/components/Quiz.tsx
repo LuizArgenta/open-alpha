@@ -27,6 +27,26 @@ interface Remediation {
   conceptName?: string;
 }
 
+/**
+ * What the engine says to do next.
+ *
+ * The results screen used to infer this: it showed a "review X" button
+ * whenever the remediation happened to carry a `conceptId`. So
+ * `review_prerequisites` and `sub_skill` got a button and
+ * `simpler_explanation` told the student "let's try explaining this
+ * differently" and gave them nothing to click. Nobody chose that — it fell
+ * out of which fields a shape happened to have.
+ */
+interface NextAction {
+  type: 'study_concept' | 'review_prerequisite' | 'micro_lesson'
+      | 'simpler_explanation' | 'practice';
+  reason: string;
+  conceptId?: string;
+  conceptName?: string;
+  interventionRunId?: string;
+  policyVersion: number;
+}
+
 interface QuizProps {
   subject: string;
   conceptId: string;
@@ -50,6 +70,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
   const [error, setError] = useState('');
   const [finished, setFinished] = useState(false);
   const [remediation, setRemediation] = useState<Remediation | null>(null);
+  const [nextAction, setNextAction] = useState<NextAction | null>(null);
   const [xp, setXp] = useState<{ amount: number; reason: string } | null>(null);
   const [serverScore, setServerScore] = useState<number | null>(null);
   const [grading, setGrading] = useState(false);
@@ -121,6 +142,7 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
       const data = await res.json();
       if (data.masteryScore !== undefined) setServerScore(data.masteryScore);
       if (data.remediation) setRemediation(data.remediation);
+      if (data.nextAction) setNextAction(data.nextAction);
       if (data.xp) setXp(data.xp);
     } catch (error) {
       console.error('Failed to submit results:', error);
@@ -252,6 +274,50 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
     const score = serverScore ?? Math.round((correctCount / questions.length) * 100);
     const passed = score >= 80;
 
+    /**
+     * One button, chosen by what the engine decided rather than by which
+     * fields came back filled in.
+     *
+     * `simpler_explanation` is the case that had nothing before: the student
+     * was told the concept would be explained another way and left with no way
+     * to see it, even though `onReviewLesson` was already wired for the
+     * mid-quiz path. Falls back to the old inference when `nextAction` is
+     * absent, so a client talking to an older server still works.
+     */
+    const actionButton = (() => {
+      if (nextAction) {
+        switch (nextAction.type) {
+          case 'review_prerequisite':
+          case 'micro_lesson':
+            if (!nextAction.conceptId || !onRemediate) return null;
+            return {
+              label: nextAction.conceptName
+                ? t('quiz.reviewConcept', { concept: nextAction.conceptName })
+                : t('quiz.reviewEarlier'),
+              onClick: () => onRemediate(nextAction.conceptId!),
+            };
+          case 'simpler_explanation':
+            if (!onReviewLesson) return null;
+            return { label: t('quiz.explainDifferently'), onClick: onReviewLesson };
+          case 'practice':
+          case 'study_concept':
+            // Nothing to send them elsewhere for: the button below already
+            // takes them back to this concept.
+            return null;
+        }
+      }
+
+      if (remediation?.conceptId && onRemediate) {
+        return {
+          label: remediation.conceptName
+            ? t('quiz.reviewConcept', { concept: remediation.conceptName })
+            : t('quiz.reviewEarlier'),
+          onClick: () => onRemediate(remediation.conceptId!),
+        };
+      }
+      return null;
+    })();
+
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
         <div className="card" style={{ textAlign: 'center', maxWidth: '400px' }}>
@@ -323,21 +389,19 @@ export default function Quiz({ subject, conceptId, conceptName, onComplete, onCa
             </p>
           )}
 
-          {!passed && remediation?.conceptId && onRemediate && (
+          {!passed && actionButton && (
             <button
-              onClick={() => onRemediate(remediation.conceptId!)}
+              onClick={actionButton.onClick}
               className="btn btn-primary"
               style={{ width: '100%', marginBottom: '0.75rem' }}
             >
-              {remediation.conceptName
-                ? t('quiz.reviewConcept', { concept: remediation.conceptName })
-                : t('quiz.reviewEarlier')}
+              {actionButton.label}
             </button>
           )}
 
           <button
             onClick={() => onComplete(score, passed)}
-            className={!passed && remediation?.conceptId && onRemediate ? 'btn btn-outline' : 'btn btn-primary'}
+            className={!passed && actionButton ? 'btn btn-outline' : 'btn btn-primary'}
             style={{ width: '100%' }}
           >
             {passed ? t('quiz.continueLearning') : t('quiz.backToLearning')}

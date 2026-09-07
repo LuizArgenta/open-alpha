@@ -29,6 +29,7 @@ import {
   interventionKeyForRemediation,
   judgeRun,
 } from '../../_lib/intervention-contract.js';
+import { POLICY_VERSION, actionForRemediation } from '../../_lib/next-action.js';
 
 interface AttemptRow {
   student_id: number;
@@ -430,6 +431,7 @@ export async function POST(request: Request) {
        * where a bare `executeSql` would deadlock behind its lock.
        */
       const awaitingResult = await openRunsFor(scope.run, auth.userId, subject, conceptId);
+      let startedRunId: string | undefined;
 
       /**
        * And only attempts that *began after* the intervention can say anything
@@ -482,7 +484,10 @@ export async function POST(request: Request) {
             conceptId,
             remediation?.conceptId ?? remediation?.action ?? 'none',
             diagnosis.pattern,
-            JSON.stringify({ score, priorAttempts }),
+            // policyVersion: which rulebook chose this. Without it, decisions
+            // recorded either side of a rule change cannot be told apart, and
+            // comparing their outcomes compares two different things.
+            JSON.stringify({ score, priorAttempts, policyVersion: POLICY_VERSION }),
           ]
         );
 
@@ -521,11 +526,12 @@ export async function POST(request: Request) {
             decisionId: Number(decision.rows[0].id),
           }, intervention.id);
 
-          await scope.run(start.sql, start.params);
+          await scope.run(start.statement.sql, start.statement.params);
+          startedRunId = start.runId;
         }
       }
 
-      return { score, newScore, passed, diagnosis, xp, remediation };
+      return { score, newScore, passed, diagnosis, xp, remediation, startedRunId };
     });
 
     if (outcome === null) {
@@ -561,6 +567,23 @@ export async function POST(request: Request) {
       });
     }
 
+    /**
+     * What the student should do, as an instruction rather than a shape to
+     * interpret.
+     *
+     * `remediation` stays for compatibility, as the PRD says it should. The
+     * difference is that the client no longer has to infer intent from which
+     * fields happen to be filled in — which is how `simpler_explanation` ended
+     * up telling a student "let's try this another way" and offering nothing
+     * to click, while `sub_skill` got a button, purely because one carried a
+     * conceptId and the other did not.
+     */
+    const nextAction = actionForRemediation(outcome.remediation, {
+      reason: outcome.diagnosis.pattern,
+      conceptId,
+      interventionRunId: outcome.startedRunId,
+    });
+
     return Response.json({
       masteryScore: outcome.newScore,
       passed: outcome.passed,
@@ -568,6 +591,7 @@ export async function POST(request: Request) {
       diagnosis: outcome.diagnosis.pattern,
       xp: outcome.xp,
       remediation: outcome.remediation,
+      nextAction,
     });
   } catch (error) {
     console.error('Submit quiz error:', error);

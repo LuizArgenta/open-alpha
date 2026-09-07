@@ -76,14 +76,21 @@ export async function findIntervention(key: string): Promise<Intervention | unde
  * one that fails. `submit.ts` writes the progress update, the decision and
  * this run together or not at all.
  */
-export function startRunStatement(run: StartRun, interventionId: number): SqlStatement {
-  return {
+export function startRunStatement(
+  run: StartRun,
+  interventionId: number
+): { statement: SqlStatement; runId: string } {
+  // The id is minted here and handed back rather than left inside the SQL,
+  // because the response now names the run: the client is told which
+  // intervention it was given, not merely what to do.
+  const runId = randomUUID();
+  const statement: SqlStatement = {
     sql: `INSERT INTO intervention_runs
             (run_id, intervention_id, student_id, decision_id, subject, concept_id,
              reason, evidence, expected_outcome)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     params: [
-      randomUUID(),
+      runId,
       interventionId,
       run.studentId,
       run.decisionId ?? null,
@@ -94,6 +101,7 @@ export function startRunStatement(run: StartRun, interventionId: number): SqlSta
       JSON.stringify(run.expectedOutcome),
     ],
   };
+  return { statement, runId };
 }
 
 export interface OpenRun {
