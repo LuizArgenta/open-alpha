@@ -30,8 +30,24 @@
  * nobody can change.
  */
 
-/** Bump when the rules that choose an action change, not when the code moves. */
-export const POLICY_VERSION = 1;
+/**
+ * Which rulebook chose an action. Bump when the *rules* change, not when the
+ * code moves.
+ *
+ * A version with no record of what changed is a number, so the changes are
+ * listed. Anyone comparing outcomes across a boundary needs to know what moved.
+ *
+ * - **1** — first action contract. Forward moves and prerequisite rollbacks
+ *   became distinct actions.
+ * - **2** — a rollback is now what the curriculum selector actually did,
+ *   rather than inferred from "this concept has no progress row and there is
+ *   progress elsewhere". That inference matched every ordinary advancement:
+ *   the next concept is by definition unseen. So identical progress that used
+ *   to yield `review_prerequisite`/`prerequisite_gap` now yields
+ *   `study_concept`/`next_in_sequence`, and decisions either side of this
+ *   boundary are not comparable without saying so.
+ */
+export const POLICY_VERSION = 2;
 
 export const NEXT_ACTION_TYPES = [
   /** Move forward: learn the next concept in sequence. */
