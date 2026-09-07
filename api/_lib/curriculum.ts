@@ -753,11 +753,33 @@ function findWeakestPrerequisite(
   return weakest;
 }
 
-export function getNextConcept(
+/** Why the engine chose this concept — moving on, or reaching back. */
+export type SelectionReason = 'next_in_sequence' | 'prerequisite_gap';
+
+export interface ConceptSelection {
+  concept: Concept;
+  reason: SelectionReason;
+}
+
+/**
+ * The next concept **and why it was chosen**.
+ *
+ * The reason has to come from here, because only this function knows. The
+ * caller used to infer it — "no progress row for this concept and some
+ * progress elsewhere, therefore the engine stepped back" — and that is wrong
+ * in the ordinary case: a student who masters one concept moves to the next
+ * *unseen* one, which by definition has no progress row. Every normal
+ * advancement was recorded as `prerequisite_gap`.
+ *
+ * It was a mislabelled row in the decision log until item 1.4 made the reason
+ * drive the action a learner is given, at which point mastering something told
+ * them to go back and review it.
+ */
+export function selectNextConcept(
   subjectId: string,
   progress: ProgressRecord[],
   gradeLevel: number
-): Concept | undefined {
+): ConceptSelection | undefined {
   const availableConcepts = getConceptsForGrade(subjectId, gradeLevel);
   const progressById = toProgressMap(progress);
   const completedConceptIds = progress
@@ -768,14 +790,23 @@ export function getNextConcept(
   if (!candidate) return undefined;
 
   // Repeated failures on the same concept usually mean a missing prerequisite,
-  // not a need to see the same material a fourth time.
+  // not a need to see the same material a fourth time. This branch — and only
+  // this branch — is the engine stepping back.
   const record = progressById.get(candidate.id);
   if (record && record.attempts >= STRUGGLE_ATTEMPTS && record.masteryScore < MASTERY_THRESHOLD) {
     const gap = findUnverifiedPrerequisite(subjectId, candidate, progressById);
-    if (gap) return gap;
+    if (gap) return { concept: gap, reason: 'prerequisite_gap' };
   }
 
-  return candidate;
+  return { concept: candidate, reason: 'next_in_sequence' };
+}
+
+export function getNextConcept(
+  subjectId: string,
+  progress: ProgressRecord[],
+  gradeLevel: number
+): Concept | undefined {
+  return selectNextConcept(subjectId, progress, gradeLevel)?.concept;
 }
 
 function selectCandidate(
