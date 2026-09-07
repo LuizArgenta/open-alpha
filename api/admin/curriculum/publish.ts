@@ -8,11 +8,18 @@
  * Publishing forces this instance to reload its curriculum, so the admin who
  * just published is not shown a stale graph. Other instances notice on their
  * own next check.
+ *
+ * It is also where provenance is enforced, and that placement is the point of
+ * item 1.6. Publishing is the moment content reaches learners, so it is the
+ * last moment at which "where did this come from, and under what licence" can
+ * still be asked cheaply. After it, the answer has to be reconstructed, and
+ * for a licence it cannot be reconstructed at all.
  */
 
 import { executeSql } from '../../_lib/db.js';
 import { isDenied, requireStaff } from '../../_lib/staff.js';
 import { validateConceptGraph } from '../../_lib/curriculum-validation.js';
+import { provenanceFromRow, provenanceProblem } from '../../_lib/provenance.js';
 import { refreshCurriculum } from '../../_lib/curriculum.js';
 
 interface ConceptRow {
@@ -20,6 +27,11 @@ interface ConceptRow {
   name: string;
   level: number;
   prerequisites: string;
+  content_source: string | null;
+  content_source_url: string | null;
+  content_source_version: string | null;
+  content_license: string | null;
+  content_attribution: string | null;
 }
 
 export async function POST(request: Request) {
@@ -35,7 +47,10 @@ export async function POST(request: Request) {
     }
 
     const rows = await executeSql<ConceptRow>(
-      'SELECT concept_id, name, level, prerequisites FROM curriculum_concepts WHERE subject_id = $1',
+      `SELECT concept_id, name, level, prerequisites,
+              content_source, content_source_url, content_source_version,
+              content_license, content_attribution
+       FROM curriculum_concepts WHERE subject_id = $1`,
       [subjectId]
     );
 
@@ -58,6 +73,30 @@ export async function POST(request: Request) {
 
       if (problems.length > 0) {
         return Response.json({ error: 'Graph is invalid', problems }, { status: 422 });
+      }
+
+      /**
+       * Nothing publishes without an account of where it came from.
+       *
+       * Refused as a list rather than at the first failure: an admin fixing a
+       * bulk import wants to know about all of them, and being told one at a
+       * time turns a single correction into twenty round trips.
+       */
+      const unaccounted = rows.rows
+        .map(row => {
+          const problem = provenanceProblem(provenanceFromRow(row));
+          return problem ? { conceptId: row.concept_id, problem } : undefined;
+        })
+        .filter((entry): entry is { conceptId: string; problem: string } => entry !== undefined);
+
+      if (unaccounted.length > 0) {
+        return Response.json(
+          {
+            error: 'Some concepts cannot be published without provenance',
+            provenance: unaccounted,
+          },
+          { status: 422 }
+        );
       }
     }
 
