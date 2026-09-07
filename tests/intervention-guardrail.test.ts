@@ -163,7 +163,7 @@ describe('an intervention is not a lesson', () => {
         reason: 'knowledge_gap',
         evidence: { score: 40 },
         expectedOutcome: EXPECTED,
-      }, intervention.id)]);
+      }, intervention.id).statement]);
 
       // Found by the same query the engine's own runs are found by. No filter
       // on source anywhere in it.
@@ -208,7 +208,7 @@ describe('an intervention is not a lesson', () => {
         reason: 'knowledge_gap',
         evidence: { score: 40 },
         expectedOutcome: EXPECTED,
-      }, intervention.id)]);
+      }, intervention.id).statement]);
 
       const [run] = await openRunsFor(directRunner, otherStudent, SUBJECT, CONCEPT);
       await executeTransaction([completeRunStatement(

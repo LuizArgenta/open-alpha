@@ -132,15 +132,18 @@ describe('failing a mastery check', () => {
     expect(Number(decision.rows[0].student_id)).toBe(studentId);
   });
 
-  it('keeps the student\'s experience unchanged', async () => {
+  it('names the run it started in the answer the student gets', async () => {
     const result = await takeQuiz(token, 'math', DECIMALS, 1, 30_000);
 
-    // Item 1.3 encapsulates the current flow and nothing more. The response is
-    // the same shape it has always been — no interventionId, no nextAction.
-    // Those are 1.4.
+    // Item 1.3 deliberately changed nothing for the student; 1.4 is where the
+    // engine starts answering with an action. `remediation` is still there —
+    // the PRD keeps it for compatibility — and now the run the engine opened
+    // is named alongside it, so "what were you given" and "did it work" refer
+    // to the same thing.
     expect(result).toMatchObject({ passed: false, remediation: expect.any(Object) });
-    expect(result).not.toHaveProperty('nextAction');
-    expect(result.remediation).not.toHaveProperty('interventionId');
+
+    const [run] = await runs();
+    expect(result.nextAction.interventionRunId).toBe(run.run_id);
   });
 
   it('starts nothing when the student passes', async () => {
